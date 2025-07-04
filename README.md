@@ -11,4 +11,4 @@ Associated fastq files can be downloaded from:<br/>
 NCBI BioProject accession number <a href="https://www.ncbi.nlm.nih.gov/Traces/study/?query_key=2&WebEnv=MCID_6865f081890df0486a4b4834&f=organism_s%3An&o=acc_s%3Aa">PRJNA1276984 </a> 
 
 
-![Fig07_summaryb](https://github.com/user-attachments/assets/27dcee10-ec82-44f3-b4c6-b5d954c4fb71)
+![Fig07_summaryb](https://github.com/StefanoVianello/ASICOB_GCP_AdultBilaterianGuts/blob/main/Fig07_summaryb.png)
