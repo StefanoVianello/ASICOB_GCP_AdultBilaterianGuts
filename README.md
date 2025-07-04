@@ -1,4 +1,4 @@
-# ASICOB_GCP_AdultBilaterianGuts
+# Code repository: "Deconstructing the common anteroposterior organisation of adult bilaterian guts" (2025)
 
 Data and code associated with the publication: <br/><br/>
 <b>"Deconstructing the common anteroposterior organisation of adult bilaterian guts" </b> <br/>
