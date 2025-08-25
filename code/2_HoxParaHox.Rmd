@@ -1,0 +1,1627 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+### Pd
+
+```{r}
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Pd_dictionary_standard.rds")
+dictionary_pdum <- Pd_dictionary_standard
+
+#Platynereis hox genes
+selected_genes <- c("XLOC_037917", #1
+                    "XLOC_037916", #2
+                    "XLOC_037912",#3
+                    "XLOC_037910",#4
+                    "XLOC_038029",#5
+                    "XLOC_037905",#6
+                    "XLOC_037894",#7
+                    "XLOC_037892", "XLOC_037884", #8
+                    "XLOC_037883", #910
+                    #
+                    "XLOC_037852"#1115
+                    
+                    )
+selected_genes
+
+
+selected_genes <- c("TCONS_00108488", #Gsx OG0003769
+                    "TCONS_00108712", #Pdx OG0008903
+                    "TCONS_00093659" #Cdx OG0002094
+)
+
+selected_genes <- c("TCONS_00145709", #Nkx2.1
+                    "TCONS_00138757", #Nkx2.2
+                    "TCONS_00032411", #Pax
+                    "TCONS_00145367" #FoxA
+)
+
+selected_genes <- c("TCONS_00065920", #Suz12
+                    "TCONS_00008166", #eed
+                    "TCONS_00089785", #ezh1/2
+                    "TCONS_00091285", #rbbp4/7
+                    "TCONS_00099453", #jarid2
+                    "TCONS_00015807", #aebp2
+                    "TCONS_00140185", #mtf2
+                    #"", #skida
+                    "TCONS_00122433" #lcor
+)
+
+
+selected_genes <- dictionary_pdum$geneID[match(selected_genes, dictionary_pdum$proteinID)]
+
+selected_genes
+```
+
+```{r}
+##we can now load the platynereis counts matrix, and the sample metadata, to plot
+#Both of these come from you (I have modified it a bit)
+load("Z://01_Stefano/Collaboration_Data/VST_Pd_corrected.rds")
+counts_VST <- VST_Pd_corrected
+
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Pd_samplemetadata_standard.rds") #SpGut_design3
+
+
+
+
+#we will also define the colours for the heatmap labels, and the AP order of the segments
+color_categorical_segment_pd <- rep(c("dodgerblue3","darkorange2",  "indianred3", "lightskyblue","lightskyblue1", "sandybrown","lightgoldenrod1", "lightyellow", "lightcoral","lightpink"), each=1)
+
+ordered_levels_segment_pd <- unique(sample_metadata$segment)
+```
+
+```{r}
+selected_genes_all <- row.names(counts_VST)[match(selected_genes, row.names(counts_VST))]
+selected_genes_all[is.na(selected_genes_all)] <- "missing"
+selected_genes_all <- make.unique(selected_genes_all)
+selected_genes_all
+```
+
+
+```{r, echo=FALSE}
+# Almost ready to plot!
+#This is an optional step, but we need to make sure that all the genes we want to plot ("selected_genes") are actually in the counts matrix. It could be that they are not there so we need to skip them.
+
+#this code will print two tables below: one with the missing genes, one with the genes not missing.
+
+# Returns the missing genes:
+missing_genes <- as.data.frame(setdiff(selected_genes, row.names(counts_VST))) 
+colnames(missing_genes) <- "gene_ID"
+
+missing_genes$symbol <- dictionary_pdum$symbol[match(missing_genes$gene_ID,dictionary_pdum$geneID)]
+
+
+missing_genes$description <- dictionary_pdum$description[match(missing_genes$gene_ID,dictionary_pdum$geneID)]
+
+
+# Returns the existing genes:
+selected_genes <- as.data.frame(intersect(selected_genes, row.names(counts_VST)))
+colnames(selected_genes) <- "gene_ID"
+selected_genes$symbol <- dictionary_pdum$symbol[match(selected_genes$gene_ID,dictionary_pdum$geneID)]
+selected_genes$description <- dictionary_pdum$description[match(selected_genes$gene_ID,dictionary_pdum$geneID)]
+
+#print list of dicarded genes (because missing) and of retained genes (curated digestion genes, present in the dataset)
+
+kable(missing_genes, caption = "Genes missing from the dataset (ignored)")
+kable(selected_genes, caption = "Genes retained (retained)")
+
+
+#note, in this case the missing genes table is empty because there are no missing genes: all genes in the list we want to plot are in the sea urchin counts table for this dataset
+```
+
+```{r}
+#we have our list of genes, and we know we can plot all of them.
+#so we can start now:
+
+## subset the original VST objects to only keep selected genes
+counts_VST_selectedgenes <- subset(counts_VST, rownames(counts_VST) %in% selected_genes$gene_ID)
+
+#sort in the order that the genes were given
+counts_VST_selectedgenes <- counts_VST_selectedgenes[match(selected_genes$gene_ID, rownames(counts_VST_selectedgenes)), ]
+
+
+```
+
+
+
+
+
+```{r}
+#create an empty dataframe with the right number of rows, which will host the average gene values
+counts_VST_averaged <- data.frame(matrix(nrow=nrow(counts_VST_selectedgenes),ncol=0))
+
+#to start, create a summary vst that contains the average value of each gene across replicates of the same condition
+group_indeces <- c(0, cumsum(unname( table(sample_metadata$segment))))
+#calculate the average by group of replicates
+for (i in seq(1:(length(group_indeces)-1))) {
+  #print(i)
+  #print(paste0(i, "->" ,(group_indeces[i]+1),"_" ,group_indeces[i+1]))
+  tmp <- counts_VST_selectedgenes[,(group_indeces[i]+1):group_indeces[i+1]]
+  
+  tmp_averages <- rowMeans(tmp)
+  counts_VST_averaged <- cbind(counts_VST_averaged, tmp_averages)
+  
+}
+
+#set nicer column names
+colnames(counts_VST_averaged) <- paste0(unique(sample_metadata$segment), "_mean")
+
+
+
+counts_VST_selectedgenes <- counts_VST_averaged
+
+```
+
+
+
+```{r}
+#selected_genes_all <- dictionary_pdum$symbol[match(selected_genes_all,dictionary_pdum$geneID)]
+#selected_genes_all[is.na(selected_genes_all)] <- "missing"
+#selected_genes_all <- make.unique(selected_genes_all)
+
+tmp <- data.frame(matrix(NA, ncol = ncol(counts_VST_selectedgenes), nrow = length(selected_genes_all)))
+colnames(tmp) <- colnames(counts_VST_selectedgenes)
+rownames(tmp) <- selected_genes_all
+
+test <- tmp
+for (i in seq(1,nrow(tmp))) {
+  test[i,] <- counts_VST_selectedgenes[rownames(tmp)[i],]
+  
+}
+
+counts_VST_selectedgenes <- test
+```
+
+
+```{r}
+image <- Heatmap(t(scale(t(counts_VST_selectedgenes))), 
+        cluster_columns = FALSE,
+        cluster_rows = F, na_col = "white", 
+        col = rev(brewer.pal(11,"RdBu")),
+        #col = colorRamp2(c(-3, 0, 3), c("#2166AC", "#F7F7F7","#B2182B")),
+        #col =  colorRamp2(c(-2, 0, 4),  hcl_palette = "RdBu", reverse = T)
+        )
+image
+```
+```{r}
+pdf(file="Z://01_Stefano/Collaboration_Data/Figure_elements/ParaHox_Pd.pdf")
+draw(image)
+dev.off()
+```
+
+
+###Sp
+
+```{r}
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Sp_dictionary_standard.rds")
+dictionary_spur <- Sp_dictionary_standard
+
+#Sp hox genes
+selected_genes <- c("LOC576580", #1
+                    "LOC105446744", #2
+                    "LOC100888710",#3
+                    "missing",#4
+                    "LOC100888432",#5
+                    "LOC574804",#6
+                    "hox1",#7
+                    "LOC588358", #8
+                    "LOC577994", #910
+                    #
+                    "LOC577924", "Hbox7", "LOC576228" #1115
+                    
+                    )
+
+
+selected_genes <- c("XP_784486", #Gsx
+                    "NP_999815", #Pdx
+                    "XP_789158"
+)
+
+selected_genes <- c("XP_011661484", #Nkx2.1
+                    "NP_001123283", #Nkx2.2
+                    "XP_030855028", #Pax
+                    "NP_001073010" #FoxA
+)
+
+selected_genes <- c("XP_030840748", #Suz12
+                    "XP_030850530", #eed
+                    "XP_030830156", #ezh1/2
+                    "XP_030851280", #rbbp4/7
+                    "XP_030831437", #jarid2
+                    "XP_030844599","XP_030851818", #aebp2
+                    "XP_011670040", "XP_030853564",#mtf2
+                    #"", #skida
+                    "XP_030841278" #lcor
+)
+
+
+
+selected_genes <- dictionary_spur$geneID[match(selected_genes, dictionary_spur$proteinID)]
+
+selected_genes
+```
+
+```{r}
+color_categorical_segment <- c("dodgerblue2",  "dodgerblue3",  "goldenrod",  "goldenrod","goldenrod1", "goldenrod1", "orchid1", "orchid1", "orchid"
+                           )
+
+#load starting point counts matrix (batch-correct VST object), species-specific metadata, and species-specific conversion dictionary
+load("Z://01_Stefano/Collaboration_Data/VST_Sp_corrected.rds")
+counts_VST_corrected <- VST_Sp_corrected
+
+
+
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Sp_samplemetadata_standard.rds")
+sample_metadata <- SpGut_design3
+rm(SpGut_design3)
+
+#reorder counts columns based on real AP position
+counts_VST_corrected <- as.data.frame(counts_VST_corrected)
+counts_VST <- counts_VST_corrected
+```
+
+```{r}
+selected_genes_all <- row.names(counts_VST)[match(selected_genes, row.names(counts_VST))]
+selected_genes_all[is.na(selected_genes_all)] <- "missing"
+selected_genes_all <- make.unique(selected_genes_all)
+selected_genes_all
+```
+
+```{r, echo=FALSE}
+# Returns the missing genes:
+missing_genes <- as.data.frame(setdiff(selected_genes, row.names(counts_VST))) 
+colnames(missing_genes) <- "gene_ID"
+
+missing_genes$description <- dictionary_spur$symbol[match(missing_genes$gene_ID,dictionary_spur$geneID)]
+#tpo and LOC111580672_slco1c1
+
+# Returns the existing genes:
+selected_genes <- as.data.frame(intersect(selected_genes, row.names(counts_VST)))
+colnames(selected_genes) <- "gene_ID"
+selected_genes$description <- dictionary_spur$symbol[match(selected_genes$gene_ID,dictionary_spur$geneID)]
+
+#print list of dicarded genes (because missing) and of retained genes (curated digestion genes, present in the dataset)
+
+kable(missing_genes, caption = "Genes missing from the dataset (ignored)")
+kable(selected_genes, caption = "Genes retained (retained)")
+
+## subset the original VST objects to only keep selected genes
+counts_VST_selectedgenes <- subset(counts_VST, rownames(counts_VST) %in% selected_genes$gene_ID)
+
+
+
+
+#sort in the order that the genes were given
+counts_VST_selectedgenes <- counts_VST_selectedgenes[match(selected_genes$gene_ID, rownames(counts_VST_selectedgenes)), ]
+
+
+#change the rownames with a more complete description (here, only the gene names)
+rownames(counts_VST_selectedgenes) <- dictionary_spur$symbol[match(rownames(counts_VST_selectedgenes), dictionary_spur$geneID)]
+
+```
+
+
+```{r}
+#create an empty dataframe with the right number of rows, which will host the average gene values
+counts_VST_averaged <- data.frame(matrix(nrow=nrow(counts_VST_selectedgenes),ncol=0))
+
+#to start, create a summary vst that contains the average value of each gene across replicates of the same condition
+group_indeces <- c(0, cumsum(unname( table(sample_metadata$segment))))
+#calculate the average by group of replicates
+for (i in seq(1:(length(group_indeces)-1))) {
+  #print(i)
+  #print(paste0(i, "->" ,(group_indeces[i]+1),"_" ,group_indeces[i+1]))
+  tmp <- counts_VST_selectedgenes[,(group_indeces[i]+1):group_indeces[i+1]]
+  
+  tmp_averages <- rowMeans(tmp)
+  counts_VST_averaged <- cbind(counts_VST_averaged, tmp_averages)
+  
+}
+
+#set nicer column names
+colnames(counts_VST_averaged) <- paste0(unique(sample_metadata$segment), "_mean")
+
+counts_VST_selectedgenes <- counts_VST_averaged
+```
+
+
+```{r}
+selected_genes_all <- dictionary_spur$symbol[match(selected_genes_all,dictionary_spur$geneID)]
+selected_genes_all[is.na(selected_genes_all)] <- "missing"
+selected_genes_all <- make.unique(selected_genes_all)
+
+tmp <- data.frame(matrix(NA, ncol = ncol(counts_VST_selectedgenes), nrow = length(selected_genes_all)))
+colnames(tmp) <- colnames(counts_VST_selectedgenes)
+rownames(tmp) <- selected_genes_all
+
+test <- tmp
+for (i in seq(1,nrow(tmp))) {
+  test[i,] <- counts_VST_selectedgenes[rownames(tmp)[i],]
+  
+}
+
+counts_VST_selectedgenes <- test
+```
+
+```{r}
+image <- Heatmap(t(scale(t(counts_VST_selectedgenes))), 
+        cluster_columns = FALSE,
+        cluster_rows = F, na_col = "white", 
+        col = rev(brewer.pal(11,"RdBu"))
+        #col = colorRamp2(c(-3, 0, 3), c("#2166AC", "#F7F7F7","#B2182B")),
+        #col =  colorRamp2(c(-2, 0, 4),  hcl_palette = "RdBu", reverse = T)
+        )
+image
+```
+```{r}
+pdf(file="Z://01_Stefano/Collaboration_Data/Figure_elements/ParaHox_Sp.pdf")
+draw(image)
+dev.off()
+```
+
+
+
+
+
+
+
+### Pf
+
+
+```{r}
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Pf_dictionary_standard.rds")
+dictionary_pf <- Pf_dictionary_standard
+
+#Pf hox genes
+selected_genes <- c("XLOC_022442", #1
+                    "XLOC_022443", #2
+                    "XLOC_022444",#3
+                    "XLOC_022445",#4
+                    "XLOC_022447",#5
+                    "XLOC_022449",#6
+                    "XLOC_022450",#7
+                    "XLOC_022452", #8
+                    "XLOC_022453", #910
+                    #
+                    "XLOC_022455", "XLOC_021910","XLOC_021912" #1115
+                    
+                    )
+
+selected_genes <- c("TCONS_00043772", #Gsx OG0003769
+                    "TCONS_00043771", #Pdx OG0008903
+                    "TCONS_00042478" #Cdx OG0002094
+)
+
+
+selected_genes <- c("TCONS_00009628", #Nkx2.1
+                    "TCONS_00009627", #Nkx2.2
+                    "TCONS_00010942", #Pax
+                    "TCONS_00009611" #FoxA
+)
+
+
+selected_genes <- c("TCONS_00012359", #Suz12
+                    "TCONS_00000118", #eed
+                    "TCONS_00004052", #ezh1/2
+                    "TCONS_00001203", #rbbp4/7
+                    "TCONS_00008053", #jarid2
+                    "TCONS_00054302", #aebp2
+                    "TCONS_00016128", #mtf2
+                    #"", #skida
+                    "TCONS_00027729" #lcor
+)
+
+
+selected_genes <- dictionary_pf$geneID[match(selected_genes, dictionary_pf$proteinID)]
+
+selected_genes
+```
+
+
+```{r}
+##we can now load the platynereis counts matrix, and the sample metadata, to plot
+#Both of these come from you (I have modified it a bit)
+load("Z://01_Stefano/Collaboration_Data/VST_Pf_corrected.rds")
+counts_VST <- VST_Pf_corrected
+
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Pf_samplemetadata_standard.rds") #sample_metadata
+sample_metadata <- PfAP_design2
+
+dictionary_pf <-  get(load(file = "Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Pf_dictionary_standard.rds"))
+
+
+#we will also define the colours for the heatmap labels, and the AP order of the segments
+color_categorical_segment <- rep(c("dodgerblue3","darkorange2",  "indianred3",
+                                   "lightskyblue","lightskyblue1",
+                                   "sandybrown","lightgoldenrod1", "lightyellow",
+                                   "lightcoral","lightpink","mistyrose"), each=1)
+
+ordered_levels_segment <- c("Co", "Pr", "Ph1", "Ph2", "Ph3", "Es", "He1", "He2", "In1", "In2", "In3")
+```
+
+```{r}
+selected_genes_all <- row.names(counts_VST)[match(selected_genes, row.names(counts_VST))]
+selected_genes_all[is.na(selected_genes_all)] <- "missing"
+selected_genes_all <- make.unique(selected_genes_all)
+selected_genes_all
+```
+
+
+```{r, echo=FALSE}
+# Almost ready to plot!
+#This is an optional step, but we need to make sure that all the genes we want to plot ("selected_genes") are actually in the counts matrix. It could be that they are not there so we need to skip them.
+
+#this code will print two tables below: one with the missing genes, one with the genes not missing.
+
+# Returns the missing genes:
+missing_genes <- as.data.frame(setdiff(selected_genes, row.names(counts_VST))) 
+colnames(missing_genes) <- "gene_ID"
+
+missing_genes$symbol <- dictionary_pf$symbol[match(missing_genes$gene_ID,dictionary_pf$geneID)]
+
+
+missing_genes$description <- dictionary_pf$description[match(missing_genes$gene_ID,dictionary_pf$geneID)]
+
+
+# Returns the existing genes:
+selected_genes <- as.data.frame(intersect(selected_genes, row.names(counts_VST)))
+colnames(selected_genes) <- "gene_ID"
+selected_genes$symbol <- dictionary_pf$symbol[match(selected_genes$gene_ID,dictionary_pf$geneID)]
+selected_genes$description <- dictionary_pf$description[match(selected_genes$gene_ID,dictionary_pf$geneID)]
+
+#print list of dicarded genes (because missing) and of retained genes (curated digestion genes, present in the dataset)
+
+kable(missing_genes, caption = "Genes missing from the dataset (ignored)")
+kable(selected_genes, caption = "Genes retained (retained)")
+
+
+#note, in this case the missing genes table is empty because there are no missing genes: all genes in the list we want to plot are in the sea urchin counts table for this dataset
+```
+
+```{r}
+#we have our list of genes, and we know we can plot all of them.
+#so we can start now:
+
+## subset the original VST objects to only keep selected genes
+counts_VST_selectedgenes <- subset(counts_VST, rownames(counts_VST) %in% selected_genes$gene_ID)
+
+#sort in the order that the genes were given
+counts_VST_selectedgenes <- counts_VST_selectedgenes[match(selected_genes$gene_ID, rownames(counts_VST_selectedgenes)), ]
+
+
+
+```
+
+
+
+
+
+```{r}
+#create an empty dataframe with the right number of rows, which will host the average gene values
+counts_VST_averaged <- data.frame(matrix(nrow=nrow(counts_VST_selectedgenes),ncol=0))
+
+#to start, create a summary vst that contains the average value of each gene across replicates of the same condition
+group_indeces <- c(0, cumsum(unname( table(sample_metadata$segment))))
+#calculate the average by group of replicates
+for (i in seq(1:(length(group_indeces)-1))) {
+  #print(i)
+  #print(paste0(i, "->" ,(group_indeces[i]+1),"_" ,group_indeces[i+1]))
+  tmp <- counts_VST_selectedgenes[,(group_indeces[i]+1):group_indeces[i+1]]
+  
+  tmp_averages <- rowMeans(tmp)
+  counts_VST_averaged <- cbind(counts_VST_averaged, tmp_averages)
+  
+}
+
+#set nicer column names
+colnames(counts_VST_averaged) <- paste0(unique(sample_metadata$segment), "_mean")
+
+counts_VST_selectedgenes <- counts_VST_averaged
+```
+
+```{r}
+tmp <- data.frame(matrix(NA, ncol = ncol(counts_VST_selectedgenes), nrow = length(selected_genes_all)))
+colnames(tmp) <- colnames(counts_VST_selectedgenes)
+rownames(tmp) <- selected_genes_all
+
+test <- tmp
+for (i in seq(1,nrow(tmp))) {
+  test[i,] <- counts_VST_selectedgenes[rownames(tmp)[i],]
+  
+}
+
+counts_VST_selectedgenes <- test
+```
+
+
+```{r}
+image <- Heatmap(t(scale(t(counts_VST_selectedgenes))), 
+        cluster_columns = FALSE,
+        cluster_rows = F, na_col = "white", 
+        col = rev(brewer.pal(11,"RdBu"))
+        #col = colorRamp2(c(-3, 0, 3), c("#2166AC", "#F7F7F7","#B2182B")),
+        #col =  colorRamp2(c(-2, 0, 4),  hcl_palette = "RdBu", reverse = T)
+        )
+image
+```
+```{r}
+pdf(file="Z://01_Stefano/Collaboration_Data/Figure_elements/ParaHox_Pf.pdf")
+draw(image)
+dev.off()
+```
+
+
+
+### Bf
+
+
+```{r}
+dictionary_bf <- get(load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Bf_dictionary_standard.rds"))
+
+#Pf hox genes
+selected_genes <- c("LOC118403099", #1
+                    "LOC118403104", #2
+                    "LOC118403096",#3
+                    "LOC118403100",#4
+                    "LOC118403105",#5
+                    "missing",#6
+                    "LOC118403103",#7
+                    "LOC118403102", #8
+                    "LOC118403101", "LOC118403098", #910
+                    #
+                    "LOC118403925", "LOC118432725","LOC118403875", #1115
+                    "LOC118432718", "LOC118432712"
+                    
+                    )
+
+selected_genes <- c("XP_035683059", #Gsx OG0003769
+                    "XP_035682017", #Pdx OG0008903
+                    "XP_035680990" #Cdx OG0002094
+)
+
+
+selected_genes <- c("XP_035687765.1", #Nkx2.1
+                    "XP_035679695.1", #Nkx2.2
+                    "XP_035696222.1", #Pax
+                    "XP_035683186.1", "XP_035684564.1" #FoxA
+)
+
+
+selected_genes <- c("XP_035690681.1", #Suz12
+                    "XP_035687110.1", #eed
+                    "XP_035690938.1", #ezh1/2
+                    "XP_035686398.1", #rbbp4/7
+                    "XP_035679915.1","XP_035679916.1", #jarid2
+                    "XP_035695346.1", #aebp2
+                    "XP_035683962.1", #mtf2
+                    "XP_035688124.1", #skida
+                    "XP_035672467.1" #lcor
+)
+
+
+selected_genes <- dictionary_bf$geneID[match(selected_genes, dictionary_bf$proteinID)]
+
+selected_genes
+```
+```{r}
+load("Z://01_Stefano/Collaboration_Data/counts_VST_corrected_Bf.rds") #counts_VST_corrected
+counts_VST <- as.data.frame(counts_VST_corrected)
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Bf_samplemetadata_standard.rds") #BfAdultGut_design2
+sample_metadata <- BfAdultGut_design2
+```
+
+
+```{r}
+#ordered by segment and then by stage
+color_categorical_segment <- rep(c("dodgerblue3","darkorange2",  "indianred3",
+                                   "lightskyblue","lightskyblue1"), each=1)
+
+ordered_levels_segment <- c("En", "Gi", "Lv", "Mi", "Hd")
+```
+
+```{r}
+selected_genes_all <- row.names(counts_VST)[match(selected_genes, row.names(counts_VST))]
+selected_genes_all[is.na(selected_genes_all)] <- "missing"
+selected_genes_all <- make.unique(selected_genes_all)
+selected_genes_all
+```
+
+```{r, echo=FALSE}
+# Returns the missing genes:
+missing_genes <- as.data.frame(setdiff(selected_genes, row.names(counts_VST))) 
+colnames(missing_genes) <- "entrez_ID"
+#missing_genes$description <- annotation_info$merged_description[match(missing_genes$entrez_ID,annotation_info$entrez_ID)]
+#tpo and LOC111580672_slco1c1
+
+# Returns the existing genes:
+selected_genes <- as.data.frame(intersect(selected_genes, row.names(counts_VST)))
+colnames(selected_genes) <- "entrez_ID"
+#selected_genes$description <- annotation_info$merged_description[match(selected_genes$entrez_ID,annotation_info$entrez_ID)]
+
+#print list of dicarded genes (because missing) and of retained genes (curated digestion genes, present in the dataset)
+
+kable(missing_genes, caption = "Genes missing from the dataset (ignored)")
+kable(selected_genes, caption = "Manually curated genes (retained)")
+
+## subset the original VST objects to only keep selected genes
+counts_VST_selectedgenes <- subset(counts_VST, rownames(counts_VST) %in% selected_genes$entrez_ID)
+
+#sort in the order of the genes
+counts_VST_selectedgenes <- counts_VST_selectedgenes[match(selected_genes$entrez_ID, rownames(counts_VST_selectedgenes)), ]
+
+
+
+#rownames(counts_VST_selectedgenes) <- annotation_info$merged_description[match(rownames(counts_VST_selectedgenes), annotation_info$entrez_ID)]
+
+
+
+
+```
+
+
+
+```{r}
+#we have our list of genes, and we know we can plot all of them.
+#so we can start now:
+
+## subset the original VST objects to only keep selected genes
+counts_VST_selectedgenes <- subset(counts_VST, rownames(counts_VST) %in% selected_genes$entrez_ID)
+
+#sort in the order that the genes were given
+counts_VST_selectedgenes <- counts_VST_selectedgenes[match(selected_genes$entrez_ID, rownames(counts_VST_selectedgenes)), ]
+
+
+#change the rownames with a more complete description (here, only the gene names)
+#rownames(counts_VST_selectedgenes) <- dictionary_bf$symbol[match(rownames(counts_VST_selectedgenes), dictionary_bf$geneID)]
+```
+
+
+
+
+
+```{r}
+#create an empty dataframe with the right number of rows, which will host the average gene values
+counts_VST_averaged <- data.frame(matrix(nrow=nrow(counts_VST_selectedgenes),ncol=0))
+
+#to start, create a summary vst that contains the average value of each gene across replicates of the same condition
+group_indeces <- c(0, cumsum(unname( table(sample_metadata$segment))))
+#calculate the average by group of replicates
+for (i in seq(1:(length(group_indeces)-1))) {
+  #print(i)
+  #print(paste0(i, "->" ,(group_indeces[i]+1),"_" ,group_indeces[i+1]))
+  tmp <- counts_VST_selectedgenes[,(group_indeces[i]+1):group_indeces[i+1]]
+  
+  tmp_averages <- rowMeans(tmp)
+  counts_VST_averaged <- cbind(counts_VST_averaged, tmp_averages)
+  
+}
+
+#set nicer column names
+colnames(counts_VST_averaged) <- paste0(unique(sample_metadata$segment), "_mean")
+
+counts_VST_selectedgenes <- counts_VST_averaged
+
+
+```
+
+
+```{r}
+#selected_genes_all <- dictionary_pdum$symbol[match(selected_genes_all,dictionary_pdum$geneID)]
+#selected_genes_all[is.na(selected_genes_all)] <- "missing"
+#selected_genes_all <- make.unique(selected_genes_all)
+
+tmp <- data.frame(matrix(NA, ncol = ncol(counts_VST_selectedgenes), nrow = length(selected_genes_all)))
+colnames(tmp) <- colnames(counts_VST_selectedgenes)
+rownames(tmp) <- selected_genes_all
+
+test <- tmp
+for (i in seq(1,nrow(tmp))) {
+  test[i,] <- counts_VST_selectedgenes[rownames(tmp)[i],]
+  
+}
+
+counts_VST_selectedgenes <- test
+```
+
+
+```{r}
+image <- Heatmap(t(scale(t(counts_VST_selectedgenes))), 
+        cluster_columns = FALSE,
+        cluster_rows = F, na_col = "white", 
+        col = rev(brewer.pal(11,"RdBu"))
+        #col = colorRamp2(c(-3, 0, 3), c("#2166AC", "#F7F7F7","#B2182B")),
+        #col =  colorRamp2(c(-2, 0, 2),  hcl_palette = "RdBu", reverse = T)
+        )
+image
+```
+```{r}
+pdf(file="Z://01_Stefano/Collaboration_Data/Figure_elements/ParaHox_Bf.pdf")
+draw(image)
+dev.off()
+```
+
+
+### Ao
+
+
+```{r}
+#Pf hox genes
+#Aa
+selected_genes <- c("111570279", #1
+                    "111570275", #2
+                    "111570274",#3
+                    "111570276",#4
+                    "111570281",#5
+                    "missing",#6
+                    "111570272",#7
+                    "missing", #8
+                    "111570271", #9
+                    "111570267",#10
+                    "111570270",#11
+                    "missing",#12 #no support "129350657"
+                    "111570269" #13
+                     )
+
+#Ab
+selected_genes <- c("missing", #1
+                    "111588857", #2
+                    "missing",#3
+                    "missing",#4
+                    "missing",#5
+                    "missing",#6
+                    "missing",#7
+                    "missing", #8
+                    "111588862", #9 
+                    "111588855",#10
+                    "111588837",#11
+                    "missing",#12
+                    "111588836" #13
+                     )
+
+#Ba
+selected_genes <- c("111568225", #1
+                    "111568224", #2
+                    "111568217",#3
+                    "111568223",#4
+                    "111568218",#5
+                    "111568219",#6
+                    "111568221",#7
+                    "111568220", #8
+                    "111568214", #9
+                    "missing",#10 #no support "129347636"
+                    "missing",#11 #no support "118470243"
+                    "missing",#12 #no support "118470244"
+                    "111568215" #13
+                     )
+
+#Bb
+selected_genes <- c("111588319", #1
+                    "missing", #2
+                    "111588320",#3
+                    "missing",#4
+                    "111588301",#5
+                    "111588302",#6
+                    "missing",#7
+                    "missing", #8
+                    "missing", #9
+                    "missing",#10
+                    "missing",#11
+                    "missing",#12
+                    "missing" #13
+                     )
+
+
+
+#Ca
+selected_genes <- c("111571273", #1
+                    "missing", #2
+                    "111581489",#3
+                    "111581495",#4
+                    "111581494",#5
+                    "111581493",#6
+                    "missing",#7
+                    "111581492", #8
+                    "111581491", #9
+                    "111581486",#10
+                    "111581485",#11
+                    "111581490",#12
+                    "111581487" #13
+                     )
+
+#Da
+selected_genes <- c("missing", #1
+                    "missing", #2
+                    "111577839",#3
+                    "111577845",#4
+                    "missing",#5
+                    "missing",#6
+                    "missing",#7
+                    "missing", #8
+                    "111577844", #9
+                    "111577842",#10
+                    "111577843",#11
+                    "111577846",#12
+                    "missing" #13
+                     )
+
+#Db
+selected_genes <- c("missing", #1
+                    "missing", #2
+                    "missing",#3
+                    "111569215",#4
+                    "missing",#5
+                    "missing",#6
+                    "missing",#7
+                    "missing", #8
+                    "111563428", #9
+                    "missing",#10
+                    "missing",#11
+                    "missing",#12
+                    "missing" #13
+                     )
+
+
+selected_genes <- c( "XP_023127614","XP_023152826", #Gsx OG0003769
+                    "XP_023149745", #Pdx OG0008903
+                    "XP_023151702","XP_023127495", "XP_023140654" #Cdx OG0002094
+)
+
+
+
+selected_genes <- c("XP_023142663", "XP_023147232", "XP_054862157", #Nkx2.1
+                    "XP_035798013","XP_035813667", "XP_023128400", #Nkx2.2
+                    "XP_023127672","XP_023128136","XP_023128136", #Pax
+                    "XP_023127678","XP_023137890","XP_035805025","XP_023147937" #FoxA
+)
+
+selected_genes <- c("XP_023137819", "XP_023134254", #Suz12
+                    "XP_023125417", #eed
+                    "XP_023119960", "XP_023129293",#ezh1/2
+                    "XP_023137426","XP_023140178","XP_035807106", #rbbp4/7
+                    "XP_054873937","XP_023127388", #jarid2
+                    "XP_054862372","XP_023133667", #aebp2
+                    "XP_054869979","XP_023132790","XP_023137635", #mtf2
+                    "XP_035804863", #skida
+                    "XP_054865564","XP_023140699","XP_023121481" #lcor
+)
+
+
+selected_genes <- dictionary_aoce$geneID[match(selected_genes, dictionary_aoce$proteinID)]
+
+selected_genes[is.na(selected_genes)] <- "missing"
+selected_genes <- make.unique(selected_genes)
+selected_genes
+```
+
+```{r}
+##we can now load the platynereis counts matrix, and the sample metadata, to plot
+#Both of these come from you (I have modified it a bit)
+load("Z://01_Stefano/Collaboration_Data/VST_Ao_corrected.rds")
+counts_VST <- VST_Ao_corrected
+
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Ao_samplemetadata_standard.rds") #sample_metadata
+liver_metadata <- data.frame(segment = rep("liver", 3), replicate = c(1,2,3))
+rownames(liver_metadata) <- c("liv_01", "liv_02", "liv_03")
+sample_metadata <- rbind(liver_metadata, sample_metadata)
+rm(liver_metadata)
+
+dictionary_aoce <-  get(load(file = "Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Aoce_dictionary_standard.rds"))
+
+
+#we will also define the colours for the heatmap labels, and the AP order of the segments
+color_categorical_segment <- rep(c("indianred1","lightpink", "sandybrown", "lightgoldenrod1",
+                    "dodgerblue3","lightskyblue","lightskyblue1"),each=1)
+
+
+ordered_levels_segment <- c("liver","oesophagus", "stomach", "pyloric", "A_intestine", "M_intestine", "P_intestine")
+```
+
+```{r}
+selected_genes_all <- row.names(counts_VST)[match(selected_genes, row.names(counts_VST))]
+#selected_genes_all[is.na(selected_genes_all)] <- "missing"
+#selected_genes_all <- make.unique(selected_genes_all)
+selected_genes_all
+```
+
+```{r, echo=FALSE}
+# Almost ready to plot!
+#This is an optional step, but we need to make sure that all the genes we want to plot ("selected_genes") are actually in the counts matrix. It could be that they are not there so we need to skip them.
+
+#this code will print two tables below: one with the missing genes, one with the genes not missing.
+
+# Returns the missing genes:
+missing_genes <- as.data.frame(setdiff(selected_genes, row.names(counts_VST))) 
+colnames(missing_genes) <- "gene_ID"
+
+missing_genes$symbol <- dictionary_aoce$symbol[match(missing_genes$gene_ID,dictionary_aoce$geneID)]
+
+
+missing_genes$description <- dictionary_aoce$description[match(missing_genes$gene_ID,dictionary_aoce$geneID)]
+
+
+# Returns the existing genes:
+selected_genes <- as.data.frame(intersect(selected_genes, row.names(counts_VST)))
+colnames(selected_genes) <- "gene_ID"
+selected_genes$symbol <- dictionary_aoce$symbol[match(selected_genes$gene_ID,dictionary_aoce$geneID)]
+selected_genes$description <- dictionary_aoce$description[match(selected_genes$gene_ID,dictionary_aoce$geneID)]
+
+#print list of dicarded genes (because missing) and of retained genes (curated digestion genes, present in the dataset)
+
+kable(missing_genes, caption = "Genes missing from the dataset (ignored)")
+kable(selected_genes, caption = "Genes retained (retained)")
+
+
+#note, in this case the missing genes table is empty because there are no missing genes: all genes in the list we want to plot are in the sea urchin counts table for this dataset
+```
+
+```{r}
+#we have our list of genes, and we know we can plot all of them.
+#so we can start now:
+
+## subset the original VST objects to only keep selected genes
+counts_VST_selectedgenes <- subset(counts_VST, rownames(counts_VST) %in% selected_genes$gene_ID)
+
+#sort in the order that the genes were given
+counts_VST_selectedgenes <- counts_VST_selectedgenes[match(selected_genes$gene_ID, rownames(counts_VST_selectedgenes)), ]
+
+
+#change the rownames with a more complete description (here, only the gene names)
+#rownames(counts_VST_selectedgenes) <- dictionary_aoce$symbol[match(rownames(counts_VST_selectedgenes), dictionary_aoce$geneID)]
+```
+
+
+
+
+
+```{r}
+#create an empty dataframe with the right number of rows, which will host the average gene values
+counts_VST_averaged <- data.frame(matrix(nrow=nrow(counts_VST_selectedgenes),ncol=0))
+
+#to start, create a summary vst that contains the average value of each gene across replicates of the same condition
+group_indeces <- c(0, cumsum(unname( table(sample_metadata$segment))))
+#calculate the average by group of replicates
+for (i in seq(1:(length(group_indeces)-1))) {
+  #print(i)
+  #print(paste0(i, "->" ,(group_indeces[i]+1),"_" ,group_indeces[i+1]))
+  tmp <- counts_VST_selectedgenes[,(group_indeces[i]+1):group_indeces[i+1]]
+  
+  tmp_averages <- rowMeans(tmp)
+  counts_VST_averaged <- cbind(counts_VST_averaged, tmp_averages)
+  
+}
+
+#set nicer column names
+colnames(counts_VST_averaged) <- paste0(unique(sample_metadata$segment), "_mean")
+
+counts_VST_selectedgenes <- counts_VST_averaged
+```
+
+
+```{r}
+#selected_genes_all <- dictionary_aoce$symbol[match(selected_genes_all,dictionary_aoce$geneID)]
+#selected_genes_all[is.na(selected_genes_all)] <- "missing"
+#selected_genes_all <- make.unique(selected_genes_all)
+
+tmp <- data.frame(matrix(NA, ncol = ncol(counts_VST_selectedgenes), nrow = length(selected_genes_all)))
+colnames(tmp) <- colnames(counts_VST_selectedgenes)
+rownames(tmp) <- selected_genes_all
+
+test <- tmp
+for (i in seq(1,nrow(tmp))) {
+  test[i,] <- counts_VST_selectedgenes[rownames(tmp)[i],]
+  
+}
+
+counts_VST_selectedgenes <- test
+```
+
+
+```{r}
+image <- Heatmap(t(scale(t(counts_VST_selectedgenes))), cluster_columns = FALSE, cluster_rows = F, na_col = "white", col = rev(brewer.pal(11,"RdBu")))
+image
+```
+```{r}
+pdf(file="Z://01_Stefano/Collaboration_Data/Figure_elements/ParaHox_Ao.pdf")
+draw(image)
+dev.off()
+```
+
+
+```{r}
+Heatmap(t(scale(t(counts_VST_selectedgenes)))[,c(2,3,1,4,5,6,7)], cluster_columns = FALSE, cluster_rows = F, na_col = "white", col = rev(brewer.pal(11,"PiYG")))
+```
+
+##### all hox
+
+```{r}
+#Pf hox genes
+#Aa
+selected_genes1 <- c("111570279", #1
+                    "111570275", #2
+                    "111570274",#3
+                    "111570276",#4
+                    "111570281",#5
+                    
+                    "111570272",#7
+                    
+                    "111570271", #9
+                    "111570267",#10
+                    "111570270",#11
+                    #"129350657",#12 #no support
+                    "111570269" #13
+                     )
+
+colors_pg_1 <- c("PG01","PG02", "PG03","PG04", "PG05",
+                  "PG07","PG09", "PG10",
+                 "PG11", #"PG12", 
+                 "PG13")
+colors_copy_1 <- rep("Aa", length(selected_genes1))
+
+
+#Ab
+selected_genes2 <- c(
+                    "111588857", #2
+                   
+                    #"111588862", #9 #NOT EXPRESSED PAST THRESHOLD
+                    #"111588855",#10 #NOT EXPRESSED PAST THRESHOLD
+                    "111588837"#11
+               
+                    #"111588836" #13 #NOT EXPRESSED PAST THRESHOLD
+                     )
+colors_pg_2 <- c("PG02", 
+                 #"PG09", "PG10",
+                 "PG11"
+                 #"PG13"
+                 )
+colors_copy_2 <- rep("Ab", length(selected_genes2))
+
+
+#Ba
+selected_genes3 <- c(
+                    "111568224", #2
+                    "111568217",#3
+                    "111568223",#4
+                    "111568218",#5
+                    "111568219",#6
+                    "111568221",#7
+                    "111568220", #8
+                    "111568214", #9
+                    #"129347636",#10 no support
+                    #"118470243",#11 NOT EXPRESSED PAST THRESHOLD no support
+                    #"118470244",#12 no support
+                    "111568215" #13
+                     )
+colors_pg_3 <- c("PG02", "PG03","PG04", "PG05",
+                 "PG06", "PG07", "PG08", "PG09", 
+                 #"PG10",
+                 #"PG11", 
+                 #"PG12", 
+                 "PG13")
+colors_copy_3 <- rep("Ba", length(selected_genes3))
+
+#Bb
+selected_genes4 <- c("111588319", #1
+                 
+                    "111588320",#3
+                    
+                    "111588301",#5
+                    "111588302"#6
+                 
+                     )
+colors_pg_4 <- c("PG01","PG03", "PG05",
+                 "PG06")
+colors_copy_4 <- rep("Bb", length(selected_genes4))
+
+#Ca
+selected_genes5 <- c("111571273", #1
+                    
+                    "111581489",#3
+                    "111581495",#4
+                    "111581494",#5
+                    "111581493",#6
+                    
+                    "111581492", #8
+                    "111581491", #9
+                    "111581486",#10
+                    "111581485",#11
+                    "111581490",#12
+                    "111581487" #13
+                     )
+colors_pg_5 <- c("PG01","PG03","PG04", "PG05",
+                 "PG06",  "PG08", "PG09", "PG10",
+                 "PG11", "PG12", "PG13")
+
+colors_copy_5 <- rep("Ca", length(selected_genes5))
+
+#Da
+selected_genes6 <- c(
+                    "111577839",#3
+                    "111577845"#4
+                   
+                    #"111577844", #9 #NOT EXPRESSED PAST THRESHOLD
+                    #"111577842",#10 #NOT EXPRESSED PAST THRESHOLD
+                    #"111577843",#11 #NOT EXPRESSED PAST THRESHOLD
+                    #"111577846"#12 #NOT EXPRESSED PAST THRESHOLD
+                   
+                     )
+colors_pg_6 <- c("PG03","PG04"
+                 #"PG09", "PG10",
+                 #"PG11", "PG12"
+                 )
+colors_copy_6 <- rep("Da", length(selected_genes6))
+
+#Db
+selected_genes7 <- c(
+                    #"111569215",#4 #NOT EXPRESSED PAST THRESHOLD
+                  
+                    #"111563428" #9 #NOT EXPRESSED PAST THRESHOLD
+                    
+                     )
+colors_pg_7 <- c(
+  #"PG04",
+  #               "PG09"
+  )
+colors_copy_7 <- rep("Db", length(selected_genes7))
+
+selected_genes <- c(selected_genes1, selected_genes2, selected_genes3, selected_genes4, selected_genes5, selected_genes6, selected_genes7)
+
+selected_genes
+
+
+colors_pg_all <- c(colors_pg_1, colors_pg_2, colors_pg_3, colors_pg_4, colors_pg_5, colors_pg_6, colors_pg_7)
+colors_copy_all <- c(colors_copy_1, colors_copy_2, colors_copy_3, colors_copy_4, colors_copy_5, colors_copy_6, colors_copy_7)
+```
+```{r}
+##we can now load the platynereis counts matrix, and the sample metadata, to plot
+#Both of these come from you (I have modified it a bit)
+load("Z://01_Stefano/Collaboration_Data/VST_Ao_corrected.rds")
+counts_VST <- VST_Ao_corrected
+
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Ao_samplemetadata_standard.rds") #sample_metadata
+liver_metadata <- data.frame(segment = rep("liver", 3), replicate = c(1,2,3))
+rownames(liver_metadata) <- c("liv_01", "liv_02", "liv_03")
+sample_metadata <- rbind(liver_metadata, sample_metadata)
+rm(liver_metadata)
+
+dictionary_aoce <-  get(load(file = "Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Aoce_dictionary_standard.rds"))
+
+
+#we will also define the colours for the heatmap labels, and the AP order of the segments
+color_categorical_segment <- rep(c("indianred1","lightpink", "sandybrown", "lightgoldenrod1",
+                    "dodgerblue3","lightskyblue","lightskyblue1"),each=1)
+
+
+ordered_levels_segment <- c("liver","oesophagus", "stomach", "pyloric", "A_intestine", "M_intestine", "P_intestine")
+```
+
+
+
+```{r, echo=FALSE}
+# Almost ready to plot!
+#This is an optional step, but we need to make sure that all the genes we want to plot ("selected_genes") are actually in the counts matrix. It could be that they are not there so we need to skip them.
+
+#this code will print two tables below: one with the missing genes, one with the genes not missing.
+
+# Returns the missing genes:
+missing_genes <- as.data.frame(setdiff(selected_genes, row.names(counts_VST))) 
+colnames(missing_genes) <- "gene_ID"
+
+missing_genes$symbol <- dictionary_aoce$symbol[match(missing_genes$gene_ID,dictionary_aoce$geneID)]
+
+
+missing_genes$description <- dictionary_aoce$description[match(missing_genes$gene_ID,dictionary_aoce$geneID)]
+
+
+# Returns the existing genes:
+selected_genes <- as.data.frame(intersect(selected_genes, row.names(counts_VST)))
+colnames(selected_genes) <- "gene_ID"
+selected_genes$symbol <- dictionary_aoce$symbol[match(selected_genes$gene_ID,dictionary_aoce$geneID)]
+selected_genes$description <- dictionary_aoce$description[match(selected_genes$gene_ID,dictionary_aoce$geneID)]
+
+#print list of dicarded genes (because missing) and of retained genes (curated digestion genes, present in the dataset)
+
+kable(missing_genes, caption = "Genes missing from the dataset (ignored)")
+kable(selected_genes, caption = "Genes retained (retained)")
+
+
+#note, in this case the missing genes table is empty because there are no missing genes: all genes in the list we want to plot are in the sea urchin counts table for this dataset
+```
+
+```{r}
+#we have our list of genes, and we know we can plot all of them.
+#so we can start now:
+
+## subset the original VST objects to only keep selected genes
+counts_VST_selectedgenes <- subset(counts_VST, rownames(counts_VST) %in% selected_genes$gene_ID)
+
+#sort in the order that the genes were given
+counts_VST_selectedgenes <- counts_VST_selectedgenes[match(selected_genes$gene_ID, rownames(counts_VST_selectedgenes)), ]
+
+
+#change the rownames with a more complete description (here, only the gene names)
+#rownames(counts_VST_selectedgenes) <- dictionary_aoce$symbol[match(rownames(counts_VST_selectedgenes), dictionary_aoce$geneID)]
+```
+
+
+
+
+
+```{r}
+#create an empty dataframe with the right number of rows, which will host the average gene values
+counts_VST_averaged <- data.frame(matrix(nrow=nrow(counts_VST_selectedgenes),ncol=0))
+
+#to start, create a summary vst that contains the average value of each gene across replicates of the same condition
+group_indeces <- c(0, cumsum(unname( table(sample_metadata$segment))))
+#calculate the average by group of replicates
+for (i in seq(1:(length(group_indeces)-1))) {
+  #print(i)
+  #print(paste0(i, "->" ,(group_indeces[i]+1),"_" ,group_indeces[i+1]))
+  tmp <- counts_VST_selectedgenes[,(group_indeces[i]+1):group_indeces[i+1]]
+  
+  tmp_averages <- rowMeans(tmp)
+  counts_VST_averaged <- cbind(counts_VST_averaged, tmp_averages)
+  
+}
+
+#set nicer column names
+colnames(counts_VST_averaged) <- paste0(unique(sample_metadata$segment), "_mean")
+
+counts_VST_selectedgenes <- counts_VST_averaged
+```
+
+
+
+
+
+```{r, fig.width=10, fig.height=15}
+Heatmap(t(scale(t(counts_VST_selectedgenes))), cluster_columns = FALSE, cluster_rows = F, na_col = "white", col = rev(brewer.pal(11,"RdBu")))
+```
+```{r}
+counts_VST_selectedgenes_all <- counts_VST_selectedgenes
+counts_VST_selectedgenes <- counts_VST_selectedgenes[,c(2,3,5,6,7)]
+```
+
+
+```{r}
+#define column proximity matrix C (samples)
+sample_correlation_matrix <- as.matrix(cor(counts_VST_selectedgenes,method="pearson"))
+Heatmap(sample_correlation_matrix)
+```
+
+
+```{r}
+#define row proximity matrix R (genes)
+gene_correlation_matrix <- as.matrix(cor(t(counts_VST_selectedgenes),method="spearman"))
+Heatmap(gene_correlation_matrix)
+```
+
+
+
+
+
+```{r}
+#test R2E seriation, beginning with R the column/sample similarity matrix
+#manually (original paper )
+
+gene_correlation_matrix <- as.matrix(cor(t(counts_VST_selectedgenes),method="pearson"))
+Heatmap(gene_correlation_matrix, 
+        cluster_rows = T,
+        cluster_columns = T)
+plot(svd(gene_correlation_matrix)$u[, 1], svd(gene_correlation_matrix)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R1 <- as.matrix(cor(gene_correlation_matrix,method="pearson"))
+Heatmap(R1,
+        cluster_rows = T,
+        cluster_columns = T)
+plot(svd(R1)$u[, 1], svd(R1)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R2 <- as.matrix(cor(R1,method="pearson"))
+Heatmap(R2,
+        cluster_rows = T,
+        cluster_columns = T)
+plot(svd(R2)$u[, 1], svd(R2)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R3 <- as.matrix(cor(R2,method="pearson"))
+Heatmap(R3,
+        cluster_rows = T,
+        cluster_columns = T)
+plot(svd(R3)$u[, 1], svd(R3)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R4 <- as.matrix(cor(R3,method="pearson"))
+Heatmap(R4,
+        cluster_rows = T,
+        cluster_columns = T)
+plot(svd(R4)$u[, 1], svd(R4)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+
+R5 <- as.matrix(cor(R4,method="pearson"))
+Heatmap(R5,
+        cluster_rows = T,
+        cluster_columns = T)
+plot(svd(R5)$u[, 1], svd(R5)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R6 <- as.matrix(cor(R5,method="pearson"))
+Heatmap(R6,
+        cluster_rows = T,
+        cluster_columns = T)
+plot(svd(R6)$u[, 1], svd(R6)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+
+
+#in the original publication, rank is indicated as the number of eigenvalues > e-13
+length(svd(gene_correlation_matrix)$d[svd(gene_correlation_matrix)$d >= exp(-13)])
+length(svd(R1)$d[svd(R1)$d >= exp(-13)])
+length(svd(R2)$d[svd(R2)$d >= exp(-13)])
+length(svd(R3)$d[svd(R3)$d >= exp(-13)])
+length(svd(R4)$d[svd(R4)$d >= exp(-13)])
+length(svd(R5)$d[svd(R5)$d >= exp(-13)])
+length(svd(R6)$d[svd(R6)$d >= exp(-13)])
+
+#finally, plot the sum of squares of eigenvalues
+df_sos <- data.frame(sum_of_squares = c(sum((svd(gene_correlation_matrix)$d)^2),
+                sum((svd(R1)$d)^2),
+                sum((svd(R2)$d)^2),
+                sum((svd(R3)$d)^2),
+                sum((svd(R4)$d)^2),
+                sum((svd(R5)$d)^2),
+                sum((svd(R6)$d)^2)
+                )
+)
+df_sos$R <- c(0,seq(from=1, to=(nrow(df_sos)-1)))
+df_sos
+
+plot(df_sos$R, df_sos$sum_of_squares)
+```
+
+
+```{r}
+#identify the first rank 2 matrix (R4 in this case)
+R_r2 <- R3
+#R_r2 <- as.matrix(cor(R_r2,method="pearson"))
+Heatmap(R_r2,
+        cluster_rows = T,
+        cluster_columns = T)
+plot(svd(R_r2)$u[, 1], svd(R_r2)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+#the two axis of the 2D ellipse, given a matrix with rank2, with two eigenvalues, is sqrt(1/eigenvalue1) and srqt(1/eigenvalue2)
+#svd(R_r2)$d[svd(R_r2)$d >= exp(-13)]
+#1/svd(R_r2)$d[svd(R_r2)$d >= exp(-13)]
+sqrt(1/svd(R_r2)$d[svd(R_r2)$d >= exp(-13)])
+
+
+PC1PC2_df <- data.frame(U1= svd(R_r2)$u[, 1], U2=svd(R_r2)$u[, 2])
+
+ggplot(PC1PC2_df, aes(x=U1, y=U2))+
+   ggforce::geom_ellipse(aes(x0 = 0, y0 = 0, 
+                            a = sqrt(1/svd(R_r2)$d[svd(R_r2)$d >= exp(-13)])[1], 
+                            b = sqrt(1/svd(R_r2)$d[svd(R_r2)$d >= exp(-13)])[2], 
+                            angle = 0),
+                        color = "gray")+
+   geom_point()+
+  theme_bw()+
+  theme(legend.position = "null")
+
+
+#find the biggest cut
+angle <- function(x,y){
+  atan2(y[2],y[1]) - atan2(x[2],x[1])
+}
+
+for (i in seq(from=1, to=(nrow(PC1PC2_df)))) {
+  x <- c(PC1PC2_df$U1[i],PC1PC2_df$U2[i])
+  y <- c(1,0)
+  PC1PC2_df$angle[i] <- angle(x, y)
+}
+
+tmp <- PC1PC2_df[order(PC1PC2_df$angle, decreasing = T),]  
+tmp #this will be ordered counterclocwise
+
+#tmp <- PC1PC2_df[order(PC1PC2_df$angle, decreasing = F),]  
+#tmp #this will be ordered clocwise
+
+
+cuts <-  as.vector(tmp$angle[1:(length(tmp$angle)-1)])-as.vector(tmp$angle[2:length(tmp$angle)])
+cuts <- c(cuts, tmp$angle[length(tmp$angle)]+tmp$angle[1])
+cuts
+
+plot_ly(data = tmp, 
+        x = ~U1, y = ~U2, 
+        #color = ~segment, 
+        #symbol = ~species,
+        #colors = c("chocolate1", "green3", "pink","orchid", "skyblue"),
+        #colors = color_categorical_all,
+        #colors = c("indianred1", "dodgerblue", "dodgerblue"),
+        #colors = colorRampPalette(brewer.pal(name = "RdBu", n = 9))(13),
+        type = "scatter", 
+        mode = "markers", 
+        marker = list(size = 2, width=2), # controls size of points
+        text=~seq(1:nrow(tmp)), #This is that extra column we made earlier for which we will use for cell ID
+        hoverinfo="text") #When you visualize your plotly object, hovering your mouse pointer over a point shows cell names
+
+#cut_index <- which(abs(cuts) == sort(abs(cuts), decreasing = T)[2])
+#cut_index <- which(abs(cuts) == sort(abs(cuts), decreasing = T)[2])
+```
+
+
+```{r}
+cut_index <- 13
+
+ifelse(cut_index == nrow(tmp), 
+       tmp2_genes <- tmp,
+       tmp2_genes <- rbind(tmp[(cut_index+1):nrow(tmp),], tmp[1:cut_index,])
+       )
+
+tmp2_genes
+#as.numeric(rownames(tmp2_genes))
+```
+
+```{r}
+Heatmap(gene_correlation_matrix,
+        cluster_rows = F,
+        cluster_columns = F,
+        row_order = rownames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))],
+        column_order = colnames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))])
+```
+
+
+
+```{r, fig.height=10, fig.width=20}
+
+#we can now plot the three matrices
+ht1 <- Heatmap(gene_correlation_matrix,
+               width=3,
+        cluster_rows = F,
+        cluster_columns = F,
+        row_order = rownames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))],
+        #row_order = rownames(counts_VST_selectedgenes)[as.numeric(c(c("11", "13"), rownames(tmp2_genes)[1:23]))],
+        column_order = colnames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))],
+        col = rev(brewer.pal(9,"PiYG")),
+        use_raster = TRUE)
+
+
+ht2 <- Heatmap(t(scale(t(counts_VST_selectedgenes_all))),
+               width=3,
+        cluster_rows = F,
+        cluster_columns = F,
+        row_order = rownames(counts_VST_selectedgenes_all)[as.numeric(rownames(tmp2_genes))],
+        #row_order = rownames(counts_VST_selectedgenes)[as.numeric(c(c("11", "13"), rownames(tmp2_genes)[1:23]))],
+        column_order = c("oesophagus_mean", "stomach_mean", "liver_mean",  "pyloric_mean" ,   "A_intestine_mean", "M_intestine_mean","P_intestine_mean"),
+        #column_order = colnames(counts_VST_top2000)[c(1,2,3,5,4,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21)],
+        col = rev(brewer.pal(11,"RdBu")),
+        use_raster = TRUE
+        
+        )
+
+#ht3 <- Heatmap(sample_correlation_matrix,
+#        cluster_rows = F,
+#        cluster_columns = F,
+#        row_order = rownames(sample_correlation_matrix)[as.numeric(rownames(tmp2))],
+#        column_order = colnames(sample_correlation_matrix)[as.numeric(rownames(tmp2))],
+#        col = rev(brewer.pal(9,"PiYG")))
+
+
+
+ht_list = ht1 + ht2
+draw(ht_list)
+```
+```{r, fig.width=10, fig.height=10}
+dataframe <- data.frame(gene = selected_genes$gene_ID, position = colors_pg_all, cluster = colors_copy_all)
+rownames(dataframe) <- dataframe$gene
+
+similarity_list_named <- c("lightblue1", "lightblue1", "skyblue1" ,  "dodgerblue" ,  "dodgerblue" , "goldenrod1", "goldenrod1", "orange" , "orchid1" ,  "orchid1" ,  "orchid", "orchid", "orchid"    )
+names(similarity_list_named) <- c("PG01", "PG02", "PG03", "PG04", "PG05", "PG06","PG07", "PG08", "PG09", "PG10", "PG11", "PG12", "PG13")
+
+similarity_list_named2 <- c("gray40", "gray70", "white" ,  "white" ,  "white" , "white", "white"   )
+names(similarity_list_named2) <- c("Aa", "Ab", "Ba", "Bb", "Ca", "Da","Db")
+
+similarity_list_named3 <- c("white", "white", "gray40" ,  "gray70" ,  "white" , "white", "white"   )
+names(similarity_list_named3) <- c("Aa", "Ab", "Ba", "Bb", "Ca", "Da","Db")
+
+similarity_list_named4 <- c("white", "white", "white" ,  "white" ,  "gray40" , "white", "white"   )
+names(similarity_list_named4) <- c("Aa", "Ab", "Ba", "Bb", "Ca", "Da","Db")
+
+similarity_list_named5 <- c("white", "white", "white" ,  "white" ,  "white" , "gray40", "gray70"   )
+names(similarity_list_named5) <- c("Aa", "Ab", "Ba", "Bb", "Ca", "Da","Db")
+
+ha = rowAnnotation(df = data.frame(treatment1 = dataframe[rownames(dataframe) %in% rownames(counts_VST_selectedgenes),"position"], 
+                                   treatment2 = dataframe[rownames(dataframe) %in% rownames(counts_VST_selectedgenes),"cluster"], 
+                                   treatment3 = dataframe[rownames(dataframe) %in% rownames(counts_VST_selectedgenes),"cluster"],
+                                   treatment4 = dataframe[rownames(dataframe) %in% rownames(counts_VST_selectedgenes),"cluster"], 
+                                   treatment5 = dataframe[rownames(dataframe) %in% rownames(counts_VST_selectedgenes),"cluster"]), #the name of the column needs to match the name of the named list
+                   
+                            
+                            col = list("treatment1" = similarity_list_named,
+                                       "treatment2" = similarity_list_named2,
+                                       "treatment3" = similarity_list_named3,
+                                       "treatment4" = similarity_list_named4,
+                                       "treatment5" = similarity_list_named5), #set the name of the named list so it matches
+                   simple_anno_size = unit(0.6, "cm"),
+                   empty2 = anno_empty(border = FALSE, width= unit(4, "mm"))
+                   
+                   )
+
+image <- Heatmap(t(scale(t(counts_VST_selectedgenes_all))),
+               width=3,
+        cluster_rows = F,
+        cluster_columns = F,
+        row_order = rownames(counts_VST_selectedgenes_all)[as.numeric(rownames(tmp2_genes))],
+        #row_order = rownames(counts_VST_selectedgenes)[as.numeric(c(c("11", "13"), rownames(tmp2_genes)[1:23]))],
+        column_order = c("liver_mean","oesophagus_mean", "stomach_mean",   "pyloric_mean" ,   "A_intestine_mean", "M_intestine_mean","P_intestine_mean"),
+        #column_order = colnames(counts_VST_top2000)[c(1,2,3,5,4,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21)],
+        col = rev(brewer.pal(11,"RdBu")),
+        use_raster = TRUE,
+        right_annotation = ha
+        
+        )
+image
+```
+```{r}
+pdf(file="Z://01_Stefano/Collaboration_Data/Figure_elements/Aoce_Hox_byR2E.pdf")
+draw(image)
+dev.off()
+```
+
+```{r, fig.width=7, fig.height=10}
+image <- Heatmap(t(scale(t(counts_VST_selectedgenes_all))),
+               width=3,
+        cluster_rows = F,
+        cluster_columns = F,
+        #row_order = rownames(counts_VST_selectedgenes_all)[as.numeric(rownames(tmp2_genes))],
+        #row_order = rownames(counts_VST_selectedgenes)[as.numeric(c(c("11", "13"), rownames(tmp2_genes)[1:23]))],
+        column_order = c("liver_mean","oesophagus_mean", "stomach_mean",   "pyloric_mean" ,   "A_intestine_mean", "M_intestine_mean","P_intestine_mean"),
+        row_split = dataframe[rownames(dataframe) %in% rownames(counts_VST_selectedgenes),"cluster"], 
+        row_gap = unit(4, "mm"),
+        #column_order = colnames(counts_VST_top2000)[c(1,2,3,5,4,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21)],
+        col = rev(brewer.pal(11,"RdBu")),
+        use_raster = TRUE,
+        right_annotation = ha
+        
+        )
+
+image
+```
+```{r}
+pdf(file="Z://01_Stefano/Collaboration_Data/Figure_elements/Aoce_Hox_byCluster.pdf")
+draw(image)
+dev.off()
+```
+
+
+
+```{r, fig.width=7, fig.height=10}
+image <- Heatmap(t(scale(t(counts_VST_selectedgenes_all))),
+               width=3,
+        cluster_rows = F,
+        cluster_columns = F,
+        #row_order = rownames(counts_VST_selectedgenes_all)[as.numeric(rownames(tmp2_genes))],
+        #row_order = rownames(counts_VST_selectedgenes)[as.numeric(c(c("11", "13"), rownames(tmp2_genes)[1:23]))],
+        column_order = c("liver_mean","oesophagus_mean", "stomach_mean",   "pyloric_mean" ,   "A_intestine_mean", "M_intestine_mean","P_intestine_mean"),
+        row_split = dataframe[rownames(dataframe) %in% rownames(counts_VST_selectedgenes),"position"], 
+        row_gap = unit(4, "mm"),
+        #column_order = colnames(counts_VST_top2000)[c(1,2,3,5,4,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21)],
+        col = rev(brewer.pal(11,"RdBu")),
+        use_raster = TRUE,
+        right_annotation = ha
+        
+        )
+
+image
+```
+
+
+```{r}
+pdf(file="Z://01_Stefano/Collaboration_Data/Figure_elements/Aoce_Hox_byPG.pdf")
+draw(image)
+dev.off()
+```
+
+
+
+
+
+
+
+

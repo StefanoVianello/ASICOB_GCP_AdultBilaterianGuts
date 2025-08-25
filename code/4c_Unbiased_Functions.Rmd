@@ -1,0 +1,2231 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r, echo=FALSE}
+library(data.table)
+library(ComplexHeatmap)
+library(circlize)
+library(plotly)
+library(vegan)
+library(tidyr)
+library(dplyr)
+library(mgsa)
+library(knitr)
+```
+
+
+## THIS PCA (species-specific z-scored matrix, NOT-TFs genes, only selected tissue)
+
+
+```{r, fig.width= 10, fig.height=4, echo=FALSE}
+#A lot of variability and associations int he datasat are either driven, or organised aorund clownfish liver, sea urchin phatynx + oesophagus, or Pf Co+Pr
+#Let us see what happens if we remove them from the analysis (of course, we loose the information about what tissue they may be similar to in other species)
+
+#load and  subset merged_metadata
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/merged_metadata.rds") #merged_metadata
+merged_metadata_all <- merged_metadata
+merged_metadata_all$segment <- factor(merged_metadata_all$segment, levels = unique(merged_metadata_all$segment))
+
+merged_metadata <- merged_metadata[!(row(merged_metadata)[,1] %in% c(1,2,3, #Ao liver
+                                                                     22,23,24,25, #Bf endostyle
+                                                                     42, 43, 44,45,46,47, #Pf anterior 2
+                                                                     #71,72,73,75,76,77,78,79, 80,81,82,
+                                                                     111,112,113, 114,115, 116 #Pd mouh
+                                                                     )),]
+merged_metadata$segment <- factor(merged_metadata$segment, levels = unique(merged_metadata$segment))
+
+#recreate zscored matrix without considering the values of those samples
+load("Z://01_Stefano/Collaboration_Data/Annotations/merged_counts.rds") #merged_counts
+
+zcounts_Ao <- merged_counts[ , 4:21]
+zcounts_Bf <- merged_counts[ , 26:41]
+zcounts_Pf <- merged_counts[ , 48:74]
+zcounts_Sp <- merged_counts[ , 75:110]
+zcounts_Pd <- merged_counts[ , 117:140]
+
+zcounts_Ao <- t(scale(t(zcounts_Ao)))
+zcounts_Bf <- t(scale(t(zcounts_Bf)))
+zcounts_Pf <- t(scale(t(zcounts_Pf)))
+zcounts_Sp <- t(scale(t(zcounts_Sp)))
+zcounts_Pd <- t(scale(t(zcounts_Pd)))
+
+
+#let us also recreate for all samples
+load("Z://01_Stefano/Collaboration_Data/Annotations/merged_counts.rds") #merged_counts
+
+zcounts_Ao_all <- merged_counts[ , 1:21]
+zcounts_Bf_all <- merged_counts[ , 22:41]
+zcounts_Pf_all <- merged_counts[ , 42:74]
+zcounts_Sp_all <- merged_counts[ , 75:110]
+zcounts_Pd_all <- merged_counts[ , 111:140]
+
+zcounts_Ao_all <- t(scale(t(zcounts_Ao_all)))
+zcounts_Bf_all <- t(scale(t(zcounts_Bf_all)))
+zcounts_Pf_all <- t(scale(t(zcounts_Pf_all)))
+zcounts_Sp_all <- t(scale(t(zcounts_Sp_all)))
+zcounts_Pd_all <- t(scale(t(zcounts_Pd_all)))
+
+#TRY BUT EXPERIMENTAL
+#https://stats.stackexchange.com/questions/178626/how-to-normalize-data-between-1-and-1
+#for (i in seq(1:nrow(zcounts_Ao))) {
+#  zcounts_Ao[i,] <- (2*((zcounts_Ao[i,]-min(zcounts_Ao[i,]))/(max(zcounts_Ao[i,])-min(zcounts_Ao[i,]))))-1
+#}
+
+#for (i in seq(1:nrow(zcounts_Bf))) {
+#  zcounts_Bf[i,] <- (2*((zcounts_Bf[i,]-min(zcounts_Bf[i,]))/(max(zcounts_Bf[i,])-min(zcounts_Bf[i,]))))-1
+#}
+
+#for (i in seq(1:nrow(zcounts_Pf))) {
+#  zcounts_Pf[i,] <- (2*((zcounts_Pf[i,]-min(zcounts_Pf[i,]))/(max(zcounts_Pf[i,])-min(zcounts_Pf[i,]))))-1
+#}
+
+#for (i in seq(1:nrow(zcounts_Sp))) {
+#  zcounts_Sp[i,] <- (2*((zcounts_Sp[i,]-min(zcounts_Sp[i,]))/(max(zcounts_Sp[i,])-min(zcounts_Sp[i,]))))-1
+#}
+
+#for (i in seq(1:nrow(zcounts_Pd))) {
+#  zcounts_Pd[i,] <- (2*((zcounts_Pd[i,]-min(zcounts_Pd[i,]))/(max(zcounts_Pd[i,])-min(zcounts_Pd[i,]))))-1
+#}
+
+
+
+#some genes have the same values in all samples, and give NaN when z-scored
+#replace Nan with 0
+zcounts_Ao[is.na(zcounts_Ao)] <- 0
+zcounts_Bf[is.na(zcounts_Bf)] <- 0
+zcounts_Pf[is.na(zcounts_Pf)] <- 0
+zcounts_Sp[is.na(zcounts_Sp)] <- 0
+zcounts_Pd[is.na(zcounts_Pd)] <- 0
+
+zmerged_counts <- Reduce(merge, lapply(list(zcounts_Ao, zcounts_Bf, zcounts_Pf, zcounts_Sp, zcounts_Pd), data.table, keep.rownames = TRUE, key = "rn"))
+zmerged_counts <- as.data.frame(zmerged_counts)
+
+#remove extra col
+rownames(zmerged_counts) <- zmerged_counts$rn
+zmerged_counts <- zmerged_counts[,2:ncol(zmerged_counts)]
+
+
+#for all segments
+zcounts_Ao_all[is.na(zcounts_Ao_all)] <- 0
+zcounts_Bf_all[is.na(zcounts_Bf_all)] <- 0
+zcounts_Pf_all[is.na(zcounts_Pf_all)] <- 0
+zcounts_Sp_all[is.na(zcounts_Sp_all)] <- 0
+zcounts_Pd_all[is.na(zcounts_Pd_all)] <- 0
+
+zmerged_counts_all <- Reduce(merge, lapply(list(zcounts_Ao_all, zcounts_Bf_all, zcounts_Pf_all, zcounts_Sp_all, zcounts_Pd_all), data.table, keep.rownames = TRUE, key = "rn"))
+zmerged_counts_all <- as.data.frame(zmerged_counts_all)
+
+#remove extra col
+rownames(zmerged_counts_all) <- zmerged_counts_all$rn
+zmerged_counts_all <- zmerged_counts_all[,2:ncol(zmerged_counts_all)]
+
+#5839
+```
+
+```{r, fig.width= 10, fig.height=4, echo=FALSE}
+
+
+
+#### AVERAGE OR NOT? (comment/uncomment)
+zmerged_counts_averaged <- data.frame(matrix(nrow=nrow(zmerged_counts),ncol=0))
+group_indeces <- c(0, cumsum(unname( table(merged_metadata$segment))))
+for (i in seq(1:(length(group_indeces)-1))) {
+  #print(i)
+  #print(paste0(i, "->" ,(group_indeces[i]+1),"_" ,group_indeces[i+1]))
+  tmp <- zmerged_counts[,(group_indeces[i]+1):group_indeces[i+1]]
+  
+  tmp_averages <- rowMeans(tmp)
+  zmerged_counts_averaged <- cbind(zmerged_counts_averaged, tmp_averages)
+  
+}
+colnames(zmerged_counts_averaged) <- paste0(unique(merged_metadata$segment), "_mean")
+zmerged_counts<- zmerged_counts_averaged
+
+merged_metadata_averaged <- merged_metadata
+merged_metadata_averaged <- merged_metadata_averaged[!duplicated(merged_metadata_averaged$segment),]
+rownames(merged_metadata_averaged) <- paste0(merged_metadata_averaged$segment, "_mean")
+merged_metadata <- merged_metadata_averaged
+###
+
+
+#### repear for all segments? (comment/uncomment)
+zmerged_counts_averaged_all <- data.frame(matrix(nrow=nrow(zmerged_counts_all),ncol=0))
+group_indeces <- c(0, cumsum(unname( table(merged_metadata_all$segment))))
+for (i in seq(1:(length(group_indeces)-1))) {
+  #print(i)
+  #print(paste0(i, "->" ,(group_indeces[i]+1),"_" ,group_indeces[i+1]))
+  tmp <- zmerged_counts_all[,(group_indeces[i]+1):group_indeces[i+1]]
+  
+  tmp_averages <- rowMeans(tmp)
+  zmerged_counts_averaged_all <- cbind(zmerged_counts_averaged_all, tmp_averages)
+  
+}
+colnames(zmerged_counts_averaged_all) <- paste0(unique(merged_metadata_all$segment), "_mean")
+zmerged_counts_all<- zmerged_counts_averaged_all
+
+merged_metadata_averaged_all <- merged_metadata_all
+merged_metadata_averaged_all <- merged_metadata_averaged_all[!duplicated(merged_metadata_averaged_all$segment),]
+rownames(merged_metadata_averaged_all) <- paste0(merged_metadata_averaged_all$segment, "_mean")
+merged_metadata_all<- merged_metadata_averaged_all
+###
+
+
+
+```
+
+```{r}
+#exclude transcription factors
+#load("Z://01_Stefano/Collaboration_Data/356_plottable_TF_orthogroups.rds") #356 TF orthogroups #orthogroups_TFs
+load("Z://01_Stefano/Collaboration_Data/Annotations/TFs/shared_TFs_8species.rds") #shared_TFs_8species [356]
+
+#subset with only non-TF orthogroups
+zmerged_counts <- zmerged_counts[!(rownames(zmerged_counts) %in% shared_TFs_8species),] #5839->5562
+
+#subset with only non-TF orthogroups
+zmerged_counts_all <- zmerged_counts_all[!(rownames(zmerged_counts_all) %in% orthogroup_TFs),] #5839->5562
+```
+
+
+### gene enrichment in all gut expressed genes
+
+```{r}
+#get ordered list by orthogroup
+ordered_orthogroups <- rownames(zmerged_counts)
+#replace with best gene  representative
+ordered_genes <-dictionary_orthogroups_best_withHox_genebased$Ao[match(ordered_orthogroups,rownames(dictionary_orthogroups_best_withHox_genebased))] #5562
+```
+
+```{r}
+#we will need to convert to ensembl
+ordered_genes_Ensembl <- annotation_info_Ao$ensembl_ID[match(ordered_genes,annotation_info_Ao$entrez_ID)]
+```
+
+```{r}
+ordered_genes_Ensembl <- na.omit(ordered_genes_Ensembl) #4953
+```
+
+
+```{r}
+load("C://Users/Doctor/Desktop/RNAseq_analyses/annotation_info_NCBIEnsembl_curated_20240411.rds")
+annotation_info <- annotation_info_NCBIEnsembl
+rm(annotation_info_NCBIEnsembl)
+
+# uncomment if not run this earlier in the code and object "ensembl" does not exist
+require(biomaRt)
+ensembl <- useMart('ensembl', dataset = 'aocellaris_gene_ensembl', host="https://useast.ensembl.org",)
+#tab_GO
+GO_annotations <- getBM(attributes = c("ensembl_gene_id", 'namespace_1003', "go_id", "name_1006"),
+                        mart = ensembl)
+#only keep genes annotated for Biological Process GO terms
+GO_annotations <- subset(GO_annotations, (namespace_1003 %in% "biological_process"))
+
+#let us also add a column with the descriptions from our annotation_info file
+GO_annotations$description <- annotation_info$merged_description[match(GO_annotations$ensembl_gene_id, annotation_info$ensembl_ID)]
+```
+
+```{r, fig.width=8, fig.height=8, echo=FALSE}
+#but try also clusterprofiler
+#Groups of genes identified by some analyses are used as input list to the mgsa function from the mgsa package13
+#(with parameters restarts=3 and steps=1e7).
+
+#The model assumes that some sets to be inferred are active and that all genes member of active sets are themselves active. Active genes are more likely to belong to the observations and inactive genes not. Fitting the model amounts to infer the probability of every set to be active given the observations.
+#Classical methods analyze each set in isolation. Because sets such as biological pathways often share genes with each other, the returned list of enriched sets is usually long and redundant. In contrast, MGSA takes set overlap into account by working on all sets simultaneously and substantially reduces the number of redundant sets.
+
+#e.g. take list of DE genes S1/S2 [== example_o]
+# take list of GO terms (obtained previously) [== example_go]
+#myset = new( "MgsaSets", sets=list(set1=LETTERS[1:3], set2=LETTERS[2:5]) )
+
+
+#prepare table where each column is a GO:pathwayID and entries are the genes that belong to that group
+GO_annotations_wide <- GO_annotations[, c("ensembl_gene_id", "go_id")]
+GO_annotations_wide$id <- seq.int(nrow(GO_annotations_wide))
+GO_annotations_wide <- GO_annotations_wide %>% pivot_wider(names_from = go_id, values_from = ensembl_gene_id)
+
+#only keep GO groups with at least 4 genes and max 500
+GO_annotations_wide <- GO_annotations_wide %>% select_if(~ sum(!is.na(.)) > 4 & sum(!is.na(.)) < 500)
+
+#replace GO codes with full names so the results are easier to interpret
+tmp <- GO_annotations[, c("name_1006", "go_id")]
+tmp <- tmp[!duplicated(tmp),]
+
+colnames(GO_annotations_wide) <- tmp$name_1006[tmp$go_id %in% colnames(GO_annotations_wide)]
+rm(tmp)
+
+
+```
+
+
+```{r}
+#run the mgsa function
+MGSA_result = mgsa(ordered_genes_Ensembl, #this is a list of genes previously obtained during the DE analysis
+                   #should maybe just take upregulated in one stage  and upregulated in the other, separatedly
+                   GO_annotations_wide, 
+                   restarts=5,  
+                   steps=1e7)
+
+#show the ordered list of gene sets found
+setsResults(MGSA_result)[order(setsResults(MGSA_result)$estimate, decreasing = TRUE),][1:40,]
+#plot(MGSA_result)
+
+#The model have three parameters:
+# α, the false positive rate i.e. the probability of an inactive gene to actually be observed;
+# β, the false negative rate i.e. the probability of an active gene to actually be not observed;
+# p, the prior probability for any set to be active, a typically small number ensuring sparse solutions to be inferred
+
+#res = setsResults(MGSA_result)
+#subset(res, estimate > 0.5)
+```
+
+<br/> Below, for reference, the scoring of all Gene Ontology gene sets considered, and the hyperparameters of the model ( _alpha_ , _beta_, and indirectly _p_ ):
+
+```{r, echo=FALSE, fig.width=9, fig.height=9, warning=FALSE}
+#for customisation purposes, let us try to obtain the same plots as plot(MGSA_result)
+
+#set space for 4 plots
+par(mfrow=c(2,2))
+
+##p, alpha, beta hyperparameters of the model
+## Note this is the information that would be extracted from the original bottom 3 plots
+
+# average number of gene sets expected to be active: p* number of gene sets considered
+pPost <- (pPost(MGSA_result)[which.max(pPost(MGSA_result)$estimate), ]$value)*dim(MGSA_result@setsResults)[1]
+# most likely alpha parameter of the model (false positive)
+pAlpha <- alphaPost(MGSA_result)[which.max(pPost(MGSA_result)$estimate), ]$value
+# most likely beta parameter of the model (false negative rate)
+pBeta <- betaPost(MGSA_result)[which.max(pPost(MGSA_result)$estimate), ]$value
+
+title <- paste0("MGSA analysis: \n \n expected active gene sets: ",pPost,"\n alpha (false positives): ", pAlpha, "\n beta (false negatives): ",pBeta)
+
+# TEXT
+plot(1:100, type="n", xaxt="n", yaxt="n", bty="n", xlab="", ylab="")
+text(x=50, y=50, title , cex=1.2)
+
+## DOTPLOT
+
+tmp <- data.frame(go_id = colnames(GO_annotations_wide), estimate =MGSA_result@setsResults[["estimate"]])
+# sort(tmp$estimate, index.return=TRUE, decreasing=TRUE)$ix[1:10] #returns the index of the top 10 scoring sets
+
+plot(seq(1:dim(tmp)[1]),
+     tmp$estimate,
+     xlab="",
+     ylab="Posterior Probability of activation",
+     #ylim=c(0,3.6),
+     xaxt = "n", #remove x axis tikmarks
+     #las=1, #this is ignored if defining labels later
+     pch=16,
+     cex=1,
+     col = ifelse(seq(1:dim(tmp)[1]) %in% sort(tmp$estimate, index.return=TRUE, decreasing=TRUE)$ix[1:10], "dodgerblue", alpha ("black", 0.3))
+     )
+axis(1, sort(tmp$estimate, index.return=TRUE, decreasing=TRUE)$ix[1:10],las=2, cex.axis=0.5, font=2, labels = colnames(GO_annotations_wide)[sort(tmp$estimate, index.return=TRUE, decreasing=TRUE)$ix[1:10]])
+title("Posterior probabilities of activation")
+abline(h=0.5,col="grey")
+#text(sort(tmp$estimate, index.return=TRUE, decreasing=TRUE)$ix[1:10], tmp$estimate[sort(tmp$estimate, index.return=TRUE, decreasing=TRUE)$ix[1:10]]-0.04, labels=colnames(GO_annotations_wide)[sort(tmp$estimate, index.return=TRUE, decreasing=TRUE)$ix[1:10]], cex=0.7)
+
+#DENSITY PLOT
+
+plot(density(tmp$estimate),
+     col= "dodgerblue",
+     lwd= 2,
+     main="",
+     xlab="Posterior probability of activation",
+     ylab="Number of GO sets \n with given probability",
+     #ylim=range(pretty(c(0, 1)))
+     )
+abline(v=0.5,col="grey")
+title("Distribution of posterior activation probabilities")
+
+#BARPLOT
+
+sorted_tmp <- tmp
+sorted_tmp$sd <- MGSA_result@setsResults[["std.error"]]
+sorted_tmp$index <- seq(1:dim(sorted_tmp)[1])
+sorted_tmp <- sorted_tmp[order(sorted_tmp$estimate, decreasing = TRUE),]
+#sorted_tmp <- as.data.frame(sort(sorted_tmp$estimate, index.return=TRUE, decreasing=TRUE))
+sorted_tmp$rank <- seq(1:dim(sorted_tmp)[1])
+#colnames(sorted_tmp) <- c("estimate", "index", "rank")
+
+plot(sorted_tmp[1:20,]$estimate,
+     sorted_tmp[1:20,]$rank,
+     xlab="Posterior Probability of activation \n +/- Standard Error",
+     ylab="",
+     #ylim=c(1,20),
+     ylim = rev(range(sorted_tmp[1:20,]$rank)), #so that higher ranks (lower positions) are at the bottom
+     yaxt = "n", #remove x axis tikmarks
+     #las=1, #this is ignored if defining labels later
+     pch=16,
+     cex=1,
+     col = ifelse(sorted_tmp$index %in% sort(tmp$estimate, index.return=TRUE, decreasing=TRUE)$ix[1:10], "dodgerblue", alpha ("black", 1))
+     )
+axis(2, sorted_tmp[1:20,]$rank,las=2, 
+     cex.axis=0.5, 
+     font=2, 
+     labels = colnames(GO_annotations_wide)[sorted_tmp[1:20,]$index])
+title("Posterior probabilities of activation")
+# Add error bars
+#https://www.benjaminbell.co.uk/2019/04/how-to-add-error-bars-in-r.html
+arrows(x0=sorted_tmp[1:20,]$estimate - sorted_tmp[1:20,]$sd, 
+       y0=sorted_tmp[1:20,]$rank, 
+       x1=sorted_tmp[1:20,]$estimate+ sorted_tmp[1:20,]$sd, 
+       y1=sorted_tmp[1:20,]$rank, 
+       code=3, 
+       angle=90, 
+       length=0.1,
+       col = "gray")
+
+```
+
+<br/> For the top scoring pathways, below the list of the actual genes belonging to that pathway that were found in our list of differentially-expressed genes:
+
+
+```{r, echo=FALSE}
+#for the top pathways, print the genes that have been found amongst DE
+#sorted_tmp[1:5,1] #is the colnames of GO-annotation_wide we have to extract gene codes from
+
+#for each of the top (e.g.) 15 ranking GO pathways
+for (i in seq(1:50)) {
+  pathway_genes <- GO_annotations_wide[,sorted_tmp[i,1]][!is.na(GO_annotations_wide[,sorted_tmp[i,1]])] #take the pathway with that label, and the genes that belong to it (i.e. the non-NA entries)
+  expressed <- intersect(pathway_genes, ordered_genes_Ensembl) #find which of all pathways genes are actually those found amongst DE genes
+  #print(top_table[top_table$ensembl_gene_id %in% expressed, c("FC", "adj.P.Val", "ensembl_gene_id", "description", "AveExpr", "CI.L", "CI.R")])
+  print(kable(annotation_info_Ao[annotation_info_Ao$ensembl_ID %in% expressed, c("entrez_ID", "ensembl_ID", "merged_symbol", "merged_description") ], 
+              caption= paste0("Genes of GO set:[",sorted_tmp[i,1],"] present amonst genes of interest")))
+  
+}
+     
+```
+
+
+```{r,fig.width=10, fig.height=10}
+
+#for each of the top (e.g.) 15 ranking GO pathways
+for (i in seq(1:30)) {
+  pathway_genes <- GO_annotations_wide[,sorted_tmp[i,1]][!is.na(GO_annotations_wide[,sorted_tmp[i,1]])] #take the pathway with that label, and the genes that belong to it (i.e. the non-NA entries)
+  expressed <- intersect(pathway_genes, ordered_genes_Ensembl) 
+  
+  expressed <- annotation_info_Ao$entrez_ID[match(expressed,annotation_info_Ao$ensembl_ID)]
+expressed_OG <- rownames(dictionary_orthogroups_best_withHox_genebased[match(expressed,dictionary_orthogroups_best_withHox_genebased$Ao),])
+
+#counts_VST_tmp <- counts_VST_selectedgenes[rownames(counts_VST_selectedgenes) %in% expressed_OG,]
+
+counts_VST_tmp <- zmerged_counts_all[rownames(zmerged_counts_all) %in% expressed_OG,]
+
+
+
+rownames(counts_VST_tmp) <- dictionary_orthogroups_best_withHox_genebased$Ao[match(rownames(counts_VST_tmp) ,rownames(dictionary_orthogroups_best_withHox_genebased))]
+
+#add a column with the ocellaris description for that gene
+rownames(counts_VST_tmp) <- annotation_info_Ao$merged_description[match(rownames(counts_VST_tmp) ,annotation_info_Ao$entrez_ID)] 
+
+
+
+htmp <- Heatmap(as.matrix(counts_VST_tmp),
+                column_title = paste0("GO set:[",sorted_tmp[i,1],"]"),
+        cluster_columns = F,
+        column_split = factor(merged_metadata_all$species, levels=c("Pd","Sp", "Pf", "Bf", "Ao")),
+        col = rev(brewer.pal(11,"RdBu"))
+        )
+
+plot(htmp)
+  
+  
+}
+
+
+```
+
+
+```{r,fig.width=10, fig.height=10}
+
+#for each of the top (e.g.) 15 ranking GO pathways
+for (i in seq(1:25)) {
+  pathway_genes <- GO_annotations_wide[,sorted_tmp[i,1]][!is.na(GO_annotations_wide[,sorted_tmp[i,1]])] #take the pathway with that label, and the genes that belong to it (i.e. the non-NA entries)
+  expressed <- intersect(pathway_genes, ordered_genes_Ensembl) 
+  
+  expressed <- annotation_info_Ao$entrez_ID[match(expressed,annotation_info_Ao$ensembl_ID)]
+expressed_OG <- rownames(dictionary_orthogroups_best_withHox_genebased[match(expressed,dictionary_orthogroups_best_withHox_genebased$Ao),])
+
+#counts_VST_tmp <- counts_VST_selectedgenes[rownames(counts_VST_selectedgenes) %in% expressed_OG,]
+
+counts_VST_tmp <- zmerged_counts_all[rownames(zmerged_counts_all) %in% expressed_OG,]
+
+
+
+rownames(counts_VST_tmp) <- dictionary_orthogroups_best_withHox_genebased$Ao[match(rownames(counts_VST_tmp) ,rownames(dictionary_orthogroups_best_withHox_genebased))]
+
+#add a column with the ocellaris description for that gene
+rownames(counts_VST_tmp) <- annotation_info_Ao$merged_description[match(rownames(counts_VST_tmp) ,annotation_info_Ao$entrez_ID)] 
+
+pdf(file=paste0("Z://01_Stefano/Collaboration_Data/Figure_elements/nonTF_enrichedGOs_heatmaps_",i, ".pdf"))
+
+htmp <- Heatmap(as.matrix(counts_VST_tmp),
+                column_title = paste0("GO set:[",sorted_tmp[i,1],"]"),
+        cluster_columns = F,
+        column_split = factor(merged_metadata_all$species, levels=c("Pd","Sp", "Pf", "Bf", "Ao")),
+        col = rev(brewer.pal(11,"RdBu"))
+        )
+
+plot(htmp)
+dev.off()  
+  
+}
+
+
+```
+
+
+
+
+
+
+
+###continue
+
+
+```{r}
+#it is too computationally demandind to run on all genes. Select the top 2500 variant
+var_genes <- apply(zmerged_counts, 1, var)
+# Get the gene names for the top 1000 most variable genes
+top_genes <- names(sort(var_genes, decreasing=TRUE))[1:2500] #[1:2000] if you want to put a precise number (eg Top2000 genes)
+# Subset vst matrix
+counts_VST_top2000 <- zmerged_counts[top_genes,]
+
+#remove unused variables
+rm(var_genes)
+```
+
+
+```{r}
+
+## For PCA we need to start with the data in the correct format (we need conditions as row, and genes as columns)
+
+# transpose our counts matrix (switch rows and columns)
+counts_VST_top2000_transposed <- t(counts_VST_top2000)
+
+
+
+```
+
+
+###Joint R2E seriation 
+```{r, fig.width=10, fig.height=15}
+Heatmap(t(scale(t(zmerged_counts[top_genes,]))), cluster_columns = T, cluster_rows = T, na_col = "white", col = rev(brewer.pal(11,"RdBu")))
+```
+```{r}
+counts_VST_selectedgenes_all <- zmerged_counts[top_genes,]
+#counts_VST_selectedgenes <- zmerged_counts_TFs[,c(2,3,5,6,7)]
+counts_VST_selectedgenes <- zmerged_counts[top_genes,]
+```
+
+
+```{r}
+#define column proximity matrix C (samples)
+sample_correlation_matrix <- as.matrix(cor(counts_VST_selectedgenes,method="pearson"))
+ht <- Heatmap(sample_correlation_matrix)
+ht <- draw(ht)
+ht
+```
+```{r, fig.width=10, fig.height=10}
+# calculate correlation betwwen samples
+
+# Users should always use circlize::colorRamp2() function to generate the color mapping function
+#col_fun = colorRamp2(c(-1, 0, 1), brewer.pal(9,"BuPu")[c(1,5,9)])
+
+color_categorical_segment <- c("skyblue2", "dodgerblue", "goldenrod2", "goldenrod1", "magenta", "orchid",
+                               "skyblue2", "indianred", "goldenrod1", "orchid",
+                               "skyblue2", "skyblue2", "skyblue2", "dodgerblue", "indianred", "indianred", "magenta", "magenta", "orchid",
+                               "skyblue2", "dodgerblue", "goldenrod2", "goldenrod1", "goldenrod1","goldenrod1", "magenta","magenta", "orchid",
+                               "skyblue2", "dodgerblue", "goldenrod2", "goldenrod1", "magenta", "magenta", "orchid", "orchid")
+names(color_categorical_segment) <- paste0(unique(merged_metadata$segment), "_mean")
+color_categorical_segment_named <- color_categorical_segment
+
+
+colAnn <- HeatmapAnnotation(df = data.frame(segment = paste0(unique(merged_metadata$segment), "_mean")), #the name of the column needs to mutch the name of the named list
+                            which = 'col',
+                            col = list("segment" = color_categorical_segment_named), #set the name of the named list so it matches
+                            #annotation_width = unit(c(1, 4), 'cm'),
+                            #gap = unit(1, 'mm')
+                            show_legend = FALSE,
+                            show_annotation_name = FALSE
+                            )
+
+rowAnn <- rowAnnotation(df = data.frame(segment = paste0(unique(merged_metadata$segment), "_mean")), #the name of the column needs to mutch the name of the named list
+                            col = list("segment" = color_categorical_segment_named), #set the name of the named list so it matches
+                        show_legend = FALSE,
+                        show_annotation_name = FALSE
+                            )
+
+
+
+#### samples
+
+
+rightAnn <- rowAnnotation(df = data.frame(Ao = paste0(unique(merged_metadata$segment), "_mean"),
+                                          Bf = paste0(unique(merged_metadata$segment), "_mean"),
+                                          Pf = paste0(unique(merged_metadata$segment), "_mean"),
+                                          Sp = paste0(unique(merged_metadata$segment), "_mean"),
+                                          Pd = paste0(unique(merged_metadata$segment), "_mean")), #the name of the column needs to match the name of the named list
+                   
+                            
+                            col = list("Ao" = replace(color_categorical_segment_named,seq(1,36)[!(seq(1,36) %in% (seq(from=1, to=6)))], "white"),
+                                       "Bf" = replace(color_categorical_segment_named,seq(1,36)[!(seq(1,36) %in% (seq(from=7, to=10)))], "white"),
+                                       "Pf" = replace(color_categorical_segment_named,seq(1,36)[!(seq(1,36) %in% (seq(from=11, to=19)))], "white"),
+                                       "Sp" = replace(color_categorical_segment_named,seq(1,36)[!(seq(1,36) %in% (seq(from=20, to=28)))], "white"),
+                                       "Pd" = replace(color_categorical_segment_named,seq(1,36)[!(seq(1,36) %in% (seq(from=29, to=36)))], "white")), #set the name of the named list so it matches
+                   simple_anno_size = unit(0.6, "cm"),
+                   empty2 = anno_empty(border = FALSE, width= unit(4, "mm")),
+                   show_legend = FALSE
+                   
+                   )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Heatmap(mat = sample_correlation_matrix,
+        name= "Pearson rho",
+        column_title = gt_render(paste0("<span style='color:darkorchid4'>**Spearman's ", expression(ρ), "**</span> correlation coeff. <br/> between samples <span style='color:gray60'>(on most variable genes)</span>")),
+        #col = brewer.pal(9,"BuPu"),
+        col = colorRamp2(c(-1, 0, 1), rev(brewer.pal(9,"RdGy")[c(1,5,9)])),
+        #col = colorRamp2(c(-1, 0, 1), brewer.pal(9,"PiYG")[c(1,5,9)]),
+        #col = brewer.pal(9,"PiYG"),
+        #col =  colorRamp2(c(-0.5, 0, 1), brewer.pal(9,"PiYG")[c(1,5,9)]),
+        #col = 
+        na_col = "black",
+        cluster_rows = T,
+        show_row_dend = T,
+        #row_order = ordered_levels,
+        cluster_columns = T,
+        show_column_dend = T,
+        #row_order = rownames(sample_correlation_matrix)[as.numeric(rownames(tmp_genes))],
+        #column_order = colnames(sample_correlation_matrix)[as.numeric(rownames(tmp_genes))],
+        #column_order = ordered_levels,
+        #row_split = factor(paste0(unique(sample_metadata$segment), "_mean"), levels = paste0(unique(sample_metadata$segment), "_mean")),
+        #column_split = factor(paste0(unique(sample_metadata$segment), "_mean"), levels = paste0(unique(sample_metadata$segment), "_mean")),
+        cluster_row_slices = FALSE,
+        cluster_column_slices = FALSE,
+        row_title = NULL,
+        row_gap = unit(0.5, "mm"),
+        column_gap = unit(0.5, "mm"),
+        width = unit(12, "cm"), 
+        height = unit(12, "cm"),
+        column_names_gp = grid::gpar(fontsize = 8),
+        row_names_gp = grid::gpar(fontsize = 8),
+        top_annotation = colAnn,
+        left_annotation = rowAnn,
+        right_annotation = rightAnn,
+        show_heatmap_legend = T
+        )
+
+```
+
+```{r}
+#test R2E seriation, beginning with R the column/sample similarity matrix
+#manually (original paper )
+
+sample_correlation_matrix <- as.matrix(cor(counts_VST_selectedgenes,method="pearson"))
+Heatmap(sample_correlation_matrix, 
+        cluster_rows = T,
+        cluster_columns = T)
+plot(svd(sample_correlation_matrix)$u[, 1], svd(sample_correlation_matrix)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R1 <- as.matrix(cor(sample_correlation_matrix,method="pearson"))
+Heatmap(R1,
+        cluster_rows = T,
+        cluster_columns = T)
+plot(svd(R1)$u[, 1], svd(R1)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R2 <- as.matrix(cor(R1,method="pearson"))
+Heatmap(R2,
+        cluster_rows = T,
+        cluster_columns = T)
+plot(svd(R2)$u[, 1], svd(R2)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R3 <- as.matrix(cor(R2,method="pearson"))
+Heatmap(R3,
+        cluster_rows = T,
+        cluster_columns = T)
+plot(svd(R3)$u[, 1], svd(R3)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R4 <- as.matrix(cor(R3,method="pearson"))
+Heatmap(R4,
+        cluster_rows = T,
+        cluster_columns = T)
+plot(svd(R4)$u[, 1], svd(R4)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+
+R5 <- as.matrix(cor(R4,method="pearson"))
+Heatmap(R5,
+        cluster_rows = T,
+        cluster_columns = T)
+plot(svd(R5)$u[, 1], svd(R5)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R6 <- as.matrix(cor(R5,method="pearson"))
+Heatmap(R6,
+        cluster_rows = T,
+        cluster_columns = T)
+plot(svd(R6)$u[, 1], svd(R6)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+
+
+#in the original publication, rank is indicated as the number of eigenvalues > e-13
+length(svd(sample_correlation_matrix)$d[svd(sample_correlation_matrix)$d >= exp(-13)])
+length(svd(R1)$d[svd(R1)$d >= exp(-13)])
+length(svd(R2)$d[svd(R2)$d >= exp(-13)])
+length(svd(R3)$d[svd(R3)$d >= exp(-13)])
+length(svd(R4)$d[svd(R4)$d >= exp(-13)])
+length(svd(R5)$d[svd(R5)$d >= exp(-13)])
+length(svd(R6)$d[svd(R6)$d >= exp(-13)])
+
+#finally, plot the sum of squares of eigenvalues
+df_sos <- data.frame(sum_of_squares = c(sum((svd(sample_correlation_matrix)$d)^2),
+                sum((svd(R1)$d)^2),
+                sum((svd(R2)$d)^2),
+                sum((svd(R3)$d)^2),
+                sum((svd(R4)$d)^2),
+                sum((svd(R5)$d)^2),
+                sum((svd(R6)$d)^2)
+                )
+)
+df_sos$R <- c(0,seq(from=1, to=(nrow(df_sos)-1)))
+df_sos
+
+plot(df_sos$R, df_sos$sum_of_squares)
+```
+```{r}
+#identify the first rank 2 matrix (R4 in this case)
+R_r2 <- R5
+#R_r2 <- as.matrix(cor(R_r2,method="pearson"))
+Heatmap(R_r2,
+        cluster_rows = T,
+        cluster_columns = T)
+plot(svd(R_r2)$u[, 1], svd(R_r2)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+#the two axis of the 2D ellipse, given a matrix with rank2, with two eigenvalues, is sqrt(1/eigenvalue1) and srqt(1/eigenvalue2)
+#svd(R_r2)$d[svd(R_r2)$d >= exp(-13)]
+#1/svd(R_r2)$d[svd(R_r2)$d >= exp(-13)]
+sqrt(1/svd(R_r2)$d[svd(R_r2)$d >= exp(-13)])
+
+
+PC1PC2_df <- data.frame(U1= svd(R_r2)$u[, 1], U2=svd(R_r2)$u[, 2])
+
+ggplot(PC1PC2_df, aes(x=U1, y=U2))+
+   ggforce::geom_ellipse(aes(x0 = 0, y0 = 0, 
+                            a = sqrt(1/svd(R_r2)$d[svd(R_r2)$d >= exp(-13)])[1], 
+                            b = sqrt(1/svd(R_r2)$d[svd(R_r2)$d >= exp(-13)])[2], 
+                            angle = 0),
+                        color = "gray")+
+   geom_point()+
+  theme_bw()+
+  theme(legend.position = "null")
+
+
+#find the biggest cut
+angle <- function(x,y){
+  atan2(y[2],y[1]) - atan2(x[2],x[1])
+}
+
+for (i in seq(from=1, to=(nrow(PC1PC2_df)))) {
+  x <- c(PC1PC2_df$U1[i],PC1PC2_df$U2[i])
+  y <- c(1,0)
+  PC1PC2_df$angle[i] <- angle(x, y)
+}
+
+tmp <- PC1PC2_df[order(PC1PC2_df$angle, decreasing = F),]  
+tmp #this will be ordered counterclocwise
+
+#tmp <- PC1PC2_df[order(PC1PC2_df$angle, decreasing = F),]  
+#tmp #this will be ordered clocwise
+
+
+cuts <-  as.vector(tmp$angle[1:(length(tmp$angle)-1)])-as.vector(tmp$angle[2:length(tmp$angle)])
+cuts <- c(cuts, tmp$angle[length(tmp$angle)]+tmp$angle[1])
+cuts
+
+plot_ly(data = tmp, 
+        x = ~U1, y = ~U2, 
+        #color = ~segment, 
+        #symbol = ~species,
+        #colors = c("chocolate1", "green3", "pink","orchid", "skyblue"),
+        #colors = color_categorical_all,
+        #colors = c("indianred1", "dodgerblue", "dodgerblue"),
+        #colors = colorRampPalette(brewer.pal(name = "RdBu", n = 9))(13),
+        type = "scatter", 
+        mode = "markers", 
+        marker = list(size = 2, width=2), # controls size of points
+        text=~seq(1:nrow(tmp)), #This is that extra column we made earlier for which we will use for cell ID
+        hoverinfo="text") #When you visualize your plotly object, hovering your mouse pointer over a point shows cell names
+
+#cut_index <- which(abs(cuts) == sort(abs(cuts), decreasing = T)[2])
+#cut_index <- which(abs(cuts) == sort(abs(cuts), decreasing = T)[2])
+```
+
+```{r}
+#cut_index <- 30 #1000geneset
+cut_index <- 26 #2500geneset
+
+
+ifelse(cut_index == nrow(tmp), 
+       tmp_genes <- tmp,
+       tmp_genes <- rbind(tmp[(cut_index+1):nrow(tmp),], tmp[1:cut_index,])
+       )
+
+tmp_genes
+#as.numeric(rownames(tmp2_genes))
+```
+
+```{r}
+htR2E <- Heatmap(sample_correlation_matrix,
+        cluster_rows = F,
+        cluster_columns = F,
+        row_order = rownames(sample_correlation_matrix)[as.numeric(rownames(tmp_genes))],
+        column_order = colnames(sample_correlation_matrix)[as.numeric(rownames(tmp_genes))])
+
+htR2E <- draw(htR2E)
+```
+
+```{r, fig.width=10, fig.height=10}
+# calculate correlation betwwen samples
+
+# Users should always use circlize::colorRamp2() function to generate the color mapping function
+#col_fun = colorRamp2(c(-1, 0, 1), brewer.pal(9,"BuPu")[c(1,5,9)])
+
+color_categorical_segment <- c("skyblue2", "dodgerblue", "goldenrod2", "goldenrod1", "magenta", "orchid",
+                               "skyblue2", "indianred", "goldenrod1", "orchid",
+                               "skyblue2", "skyblue2", "skyblue2", "dodgerblue", "indianred", "indianred", "magenta", "magenta", "orchid",
+                               "skyblue2", "dodgerblue", "goldenrod2", "goldenrod1", "goldenrod1","goldenrod1", "magenta","magenta", "orchid",
+                               "skyblue2", "dodgerblue", "goldenrod2", "goldenrod1", "magenta", "magenta", "orchid", "orchid")
+names(color_categorical_segment) <- paste0(unique(merged_metadata$segment), "_mean")
+color_categorical_segment_named <- color_categorical_segment
+
+
+colAnn <- HeatmapAnnotation(df = data.frame(segment = paste0(unique(merged_metadata$segment), "_mean")), #the name of the column needs to mutch the name of the named list
+                            which = 'col',
+                            col = list("segment" = color_categorical_segment_named), #set the name of the named list so it matches
+                            #annotation_width = unit(c(1, 4), 'cm'),
+                            #gap = unit(1, 'mm')
+                            show_legend = FALSE,
+                            show_annotation_name = FALSE
+                            )
+
+rowAnn <- rowAnnotation(df = data.frame(segment = paste0(unique(merged_metadata$segment), "_mean")), #the name of the column needs to mutch the name of the named list
+                            col = list("segment" = color_categorical_segment_named), #set the name of the named list so it matches
+                        show_legend = FALSE,
+                        show_annotation_name = FALSE
+                            )
+
+
+
+#### samples
+
+
+rightAnn <- rowAnnotation(df = data.frame(Ao = paste0(unique(merged_metadata$segment), "_mean"),
+                                          Bf = paste0(unique(merged_metadata$segment), "_mean"),
+                                          Pf = paste0(unique(merged_metadata$segment), "_mean"),
+                                          Sp = paste0(unique(merged_metadata$segment), "_mean"),
+                                          Pd = paste0(unique(merged_metadata$segment), "_mean")), #the name of the column needs to match the name of the named list
+                   
+                            
+                            col = list("Ao" = replace(color_categorical_segment_named,seq(1,36)[!(seq(1,36) %in% (seq(from=1, to=6)))], "white"),
+                                       "Bf" = replace(color_categorical_segment_named,seq(1,36)[!(seq(1,36) %in% (seq(from=7, to=10)))], "white"),
+                                       "Pf" = replace(color_categorical_segment_named,seq(1,36)[!(seq(1,36) %in% (seq(from=11, to=19)))], "white"),
+                                       "Sp" = replace(color_categorical_segment_named,seq(1,36)[!(seq(1,36) %in% (seq(from=20, to=28)))], "white"),
+                                       "Pd" = replace(color_categorical_segment_named,seq(1,36)[!(seq(1,36) %in% (seq(from=29, to=36)))], "white")), #set the name of the named list so it matches
+                   simple_anno_size = unit(0.6, "cm"),
+                   empty2 = anno_empty(border = FALSE, width= unit(4, "mm")),
+                   show_legend = FALSE
+                   
+                   )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Heatmap(mat = sample_correlation_matrix,
+        name= "Pearson rho",
+        column_title = gt_render(paste0("<span style='color:darkorchid4'>**Spearman's ", expression(ρ), "**</span> correlation coeff. <br/> between samples <span style='color:gray60'>(on most variable genes)</span>")),
+        #col = brewer.pal(9,"BuPu"),
+        col = colorRamp2(c(-1, 0, 1), rev(brewer.pal(9,"RdGy")[c(1,5,9)])),
+        #col = colorRamp2(c(-1, 0, 1), brewer.pal(9,"PiYG")[c(1,5,9)]),
+        #col = brewer.pal(9,"PiYG"),
+        #col =  colorRamp2(c(-0.5, 0, 1), brewer.pal(9,"PiYG")[c(1,5,9)]),
+        #col = 
+        na_col = "black",
+        cluster_rows = FALSE,
+        show_row_dend = FALSE,
+        #row_order = ordered_levels,
+        cluster_columns = FALSE,
+        show_column_dend = FALSE,
+        row_order = rownames(sample_correlation_matrix)[as.numeric(rownames(tmp_genes))],
+        column_order = colnames(sample_correlation_matrix)[as.numeric(rownames(tmp_genes))],
+        #column_order = ordered_levels,
+        #row_split = factor(paste0(unique(sample_metadata$segment), "_mean"), levels = paste0(unique(sample_metadata$segment), "_mean")),
+        #column_split = factor(paste0(unique(sample_metadata$segment), "_mean"), levels = paste0(unique(sample_metadata$segment), "_mean")),
+        cluster_row_slices = FALSE,
+        cluster_column_slices = FALSE,
+        row_title = NULL,
+        row_gap = unit(0.5, "mm"),
+        column_gap = unit(0.5, "mm"),
+        width = unit(12, "cm"), 
+        height = unit(12, "cm"),
+        column_names_gp = grid::gpar(fontsize = 8),
+        row_names_gp = grid::gpar(fontsize = 8),
+        top_annotation = colAnn,
+        left_annotation = rowAnn,
+        right_annotation = rightAnn,
+        show_heatmap_legend = T
+        )
+
+```
+
+
+```{r}
+dataframe <- data.frame(gene = rownames(sample_correlation_matrix), original_order = seq(1:nrow(sample_correlation_matrix)))
+
+seriation_order <- row_order(htR2E)
+
+dataframe$original_seriation_order <- seriation_order
+
+for (i in seq(1:nrow(dataframe))) {
+  dataframe$R2E_order[i] <- which(seriation_order == dataframe$original_order[i])
+}  
+
+
+Heatmap(sample_correlation_matrix, 
+        cluster_columns = F, 
+        cluster_rows = F, 
+        #row_order = rownames(counts_VST_selectedgenes)[seriation_order],
+        row_order = dataframe$gene[order(dataframe$R2E_order)],
+        column_order= dataframe$gene[order(dataframe$R2E_order)],
+        na_col = "white", col = rev(brewer.pal(11,"RdBu")))
+```
+
+```{r, fig.width=10, fig.height=7}
+hclust <- hclust(dist(sample_correlation_matrix), method = "ward.D2")
+hclust_order <- hclust$order
+
+reordered_object <- stats::reorder(x=hclust,
+        wts= dataframe$R2E_order,
+        agglo.FUN = "mean" #note that package vegan needs to be loaded
+
+        )
+
+#reordered_object <- dendextend::rotate(hclust, dataframe$R2E_order)
+
+reorder <- reordered_object$order
+
+dataframe$original_reorded <- reorder
+
+for (i in seq(1:nrow(dataframe))) {
+  dataframe$R2EHCT_order[i] <- which(reorder == dataframe$original_order[i])
+} 
+
+
+Heatmap(sample_correlation_matrix, 
+        cluster_columns = F, 
+        cluster_rows = F, 
+        row_order = rownames(sample_correlation_matrix)[hclust_order],
+        column_order =  rownames(sample_correlation_matrix)[hclust_order],
+        na_col = "white", col = rev(brewer.pal(11,"RdBu"))
+        )
+
+
+Heatmap(sample_correlation_matrix, 
+        cluster_columns = F, 
+        cluster_rows = F, 
+        #row_order = rownames(sample_correlation_matrix)[reorder],
+        row_order = dataframe$gene[order(dataframe$R2E_order)],
+        column_order = dataframe$gene[order(dataframe$R2E_order)],
+        na_col = "white", col = rev(brewer.pal(11,"RdBu")))
+
+Heatmap(sample_correlation_matrix, 
+        cluster_columns = F, 
+        cluster_rows = as.dendrogram(reordered_object), 
+        #row_order = rownames(sample_correlation_matrix)[reorder],
+        #row_order = dataframe$gene[order(dataframe$R2EHCT_order)],
+        column_order= dataframe$gene[order(dataframe$R2EHCT_order)],
+        na_col = "white", col = rev(brewer.pal(11,"RdBu")))
+```
+
+```{r, fig.width=10, fig.height=10}
+# calculate correlation betwwen samples
+
+# Users should always use circlize::colorRamp2() function to generate the color mapping function
+#col_fun = colorRamp2(c(-1, 0, 1), brewer.pal(9,"BuPu")[c(1,5,9)])
+
+color_categorical_segment <- c("skyblue2", "dodgerblue", "goldenrod2", "goldenrod1", "magenta", "orchid",
+                               "skyblue2", "indianred", "goldenrod1", "orchid",
+                               "skyblue2", "skyblue2", "skyblue2", "dodgerblue", "indianred", "indianred", "magenta", "magenta", "orchid",
+                               "skyblue2", "dodgerblue", "goldenrod2", "goldenrod1", "goldenrod1","goldenrod1", "magenta","magenta", "orchid",
+                               "skyblue2", "dodgerblue", "goldenrod2", "goldenrod1", "magenta", "magenta", "orchid", "orchid")
+names(color_categorical_segment) <- paste0(unique(merged_metadata$segment), "_mean")
+color_categorical_segment_named <- color_categorical_segment
+
+
+colAnn <- HeatmapAnnotation(df = data.frame(segment = paste0(unique(merged_metadata$segment), "_mean")), #the name of the column needs to mutch the name of the named list
+                            which = 'col',
+                            col = list("segment" = color_categorical_segment_named), #set the name of the named list so it matches
+                            #annotation_width = unit(c(1, 4), 'cm'),
+                            #gap = unit(1, 'mm')
+                            show_legend = FALSE,
+                            show_annotation_name = FALSE
+                            )
+
+rowAnn <- rowAnnotation(df = data.frame(segment = paste0(unique(merged_metadata$segment), "_mean")), #the name of the column needs to mutch the name of the named list
+                            col = list("segment" = color_categorical_segment_named), #set the name of the named list so it matches
+                        show_legend = FALSE,
+                        show_annotation_name = FALSE
+                            )
+
+
+
+#### samples
+
+
+rightAnn <- rowAnnotation(df = data.frame(Ao = paste0(unique(merged_metadata$segment), "_mean"),
+                                          Bf = paste0(unique(merged_metadata$segment), "_mean"),
+                                          Pf = paste0(unique(merged_metadata$segment), "_mean"),
+                                          Sp = paste0(unique(merged_metadata$segment), "_mean"),
+                                          Pd = paste0(unique(merged_metadata$segment), "_mean")), #the name of the column needs to match the name of the named list
+                   
+                            
+                            col = list("Ao" = replace(color_categorical_segment_named,seq(1,36)[!(seq(1,36) %in% (seq(from=1, to=6)))], "white"),
+                                       "Bf" = replace(color_categorical_segment_named,seq(1,36)[!(seq(1,36) %in% (seq(from=7, to=10)))], "white"),
+                                       "Pf" = replace(color_categorical_segment_named,seq(1,36)[!(seq(1,36) %in% (seq(from=11, to=19)))], "white"),
+                                       "Sp" = replace(color_categorical_segment_named,seq(1,36)[!(seq(1,36) %in% (seq(from=20, to=28)))], "white"),
+                                       "Pd" = replace(color_categorical_segment_named,seq(1,36)[!(seq(1,36) %in% (seq(from=29, to=36)))], "white")), #set the name of the named list so it matches
+                   simple_anno_size = unit(0.6, "cm"),
+                   empty2 = anno_empty(border = FALSE, width= unit(4, "mm")),
+                   show_legend = FALSE
+                   
+                   )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+image <- Heatmap(mat = sample_correlation_matrix,
+        name= "Pearson rho",
+        column_title = gt_render(paste0("<span style='color:darkorchid4'>**Spearman's ", expression(ρ), "**</span> correlation coeff. <br/> between samples <span style='color:gray60'>(on most variable genes)</span>")),
+        #col = brewer.pal(9,"BuPu"),
+        col = colorRamp2(c(-1, 0, 1), rev(brewer.pal(9,"RdGy")[c(1,5,9)])),
+        #col = colorRamp2(c(-1, 0, 1), brewer.pal(9,"PiYG")[c(1,5,9)]),
+        #col = brewer.pal(9,"PiYG"),
+        #col =  colorRamp2(c(-0.5, 0, 1), brewer.pal(9,"PiYG")[c(1,5,9)]),
+        #col = 
+        na_col = "black",
+        cluster_rows = as.dendrogram(reordered_object),
+        show_row_dend = T,
+        #row_order = ordered_levels,
+        cluster_columns = as.dendrogram(reordered_object),
+        show_column_dend = T,
+       #row_order = dataframe$gene[order(dataframe$R2EHCT_order)],
+      #  column_order= dataframe$gene[order(dataframe$R2EHCT_order)],
+        #column_order = ordered_levels,
+        #row_split = factor(paste0(unique(sample_metadata$segment), "_mean"), levels = paste0(unique(sample_metadata$segment), "_mean")),
+        #column_split = factor(paste0(unique(sample_metadata$segment), "_mean"), levels = paste0(unique(sample_metadata$segment), "_mean")),
+        cluster_row_slices = FALSE,
+        cluster_column_slices = FALSE,
+        row_title = NULL,
+        row_gap = unit(0.5, "mm"),
+        column_gap = unit(0.5, "mm"),
+        width = unit(12, "cm"), 
+        height = unit(12, "cm"),
+        column_names_gp = grid::gpar(fontsize = 8),
+        row_names_gp = grid::gpar(fontsize = 8),
+        top_annotation = colAnn,
+        left_annotation = rowAnn,
+        right_annotation = rightAnn,
+        show_heatmap_legend = T
+        )
+
+draw(image)
+```
+```{r}
+pdf(file="Z://01_Stefano/Collaboration_Data/Figure_elements/nonTF_segmentseriation_R2EHCT.pdf")
+
+draw(image)
+
+dev.off()
+```
+
+
+
+```{r}
+#define row proximity matrix R (genes)
+gene_correlation_matrix <- as.matrix(cor(t(counts_VST_selectedgenes),method="spearman"))
+#Heatmap(gene_correlation_matrix)
+```
+
+
+
+
+```{r}
+#test R2E seriation, beginning with R the column/sample similarity matrix
+#manually (original paper )
+
+gene_correlation_matrix <- as.matrix(cor(t(counts_VST_selectedgenes),method="pearson"))
+#Heatmap(gene_correlation_matrix, 
+#        cluster_rows = T,
+#        cluster_columns = T)
+#plot(svd(gene_correlation_matrix)$u[, 1], svd(gene_correlation_matrix)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R1 <- as.matrix(cor(gene_correlation_matrix,method="pearson"))
+#Heatmap(R1,
+#        cluster_rows = T,
+#        cluster_columns = T)
+#plot(svd(R1)$u[, 1], svd(R1)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R2 <- as.matrix(cor(R1,method="pearson"))
+#Heatmap(R2,
+#        cluster_rows = T,
+#        cluster_columns = T)
+#plot(svd(R2)$u[, 1], svd(R2)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R3 <- as.matrix(cor(R2,method="pearson"))
+#Heatmap(R3,
+#        cluster_rows = T,
+#        cluster_columns = T)
+#plot(svd(R3)$u[, 1], svd(R3)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R4 <- as.matrix(cor(R3,method="pearson"))
+#Heatmap(R4,
+#        cluster_rows = T,
+#        cluster_columns = T)
+#plot(svd(R4)$u[, 1], svd(R4)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+
+R5 <- as.matrix(cor(R4,method="pearson"))
+#Heatmap(R5,
+#        cluster_rows = T,
+#        cluster_columns = T)
+plot(svd(R5)$u[, 1], svd(R5)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R6 <- as.matrix(cor(R5,method="pearson"))
+#Heatmap(R6,
+#        cluster_rows = T,
+#        cluster_columns = T)
+plot(svd(R6)$u[, 1], svd(R6)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+
+
+#in the original publication, rank is indicated as the number of eigenvalues > e-13
+#length(svd(gene_correlation_matrix)$d[svd(gene_correlation_matrix)$d >= exp(-13)])
+#length(svd(R1)$d[svd(R1)$d >= exp(-13)])
+#length(svd(R2)$d[svd(R2)$d >= exp(-13)])
+#length(svd(R3)$d[svd(R3)$d >= exp(-13)])
+#length(svd(R4)$d[svd(R4)$d >= exp(-13)])
+#length(svd(R5)$d[svd(R5)$d >= exp(-13)])
+#length(svd(R6)$d[svd(R6)$d >= exp(-13)])
+
+#finally, plot the sum of squares of eigenvalues
+#df_sos <- data.frame(sum_of_squares = c(sum((svd(gene_correlation_matrix)$d)^2),
+#                sum((svd(R1)$d)^2),
+#                sum((svd(R2)$d)^2),
+#                sum((svd(R3)$d)^2),
+#                sum((svd(R4)$d)^2),
+#                sum((svd(R5)$d)^2),
+#                sum((svd(R6)$d)^2)
+#                )
+#)
+#df_sos$R <- c(0,seq(from=1, to=(nrow(df_sos)-1)))
+#df_sos
+
+#plot(df_sos$R, df_sos$sum_of_squares)
+```
+
+
+
+```{r}
+#identify the first rank 2 matrix (R4 in this case)
+R_r2 <- R5
+#R_r2 <- as.matrix(cor(R_r2,method="pearson"))
+#Heatmap(R_r2,
+#        cluster_rows = T,
+#        cluster_columns = T)
+#plot(svd(R_r2)$u[, 1], svd(R_r2)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+#the two axis of the 2D ellipse, given a matrix with rank2, with two eigenvalues, is sqrt(1/eigenvalue1) and srqt(1/eigenvalue2)
+#svd(R_r2)$d[svd(R_r2)$d >= exp(-13)]
+#1/svd(R_r2)$d[svd(R_r2)$d >= exp(-13)]
+#sqrt(1/svd(R_r2)$d[svd(R_r2)$d >= exp(-13)])
+
+
+PC1PC2_df <- data.frame(U1= svd(R_r2)$u[, 1], U2=svd(R_r2)$u[, 2])
+
+#ggplot(PC1PC2_df, aes(x=U1, y=U2))+
+#   ggforce::geom_ellipse(aes(x0 = 0, y0 = 0, 
+#                            a = sqrt(1/svd(R_r2)$d[svd(R_r2)$d >= exp(-13)])[1], 
+#                            b = sqrt(1/svd(R_r2)$d[svd(R_r2)$d >= exp(-13)])[2], 
+#                            angle = 0),
+#                        color = "gray")+
+#   geom_point()+
+#  theme_bw()+
+#  theme(legend.position = "null")
+
+
+#find the biggest cut
+angle <- function(x,y){
+  atan2(y[2],y[1]) - atan2(x[2],x[1])
+}
+
+for (i in seq(from=1, to=(nrow(PC1PC2_df)))) {
+  x <- c(PC1PC2_df$U1[i],PC1PC2_df$U2[i])
+  y <- c(1,0)
+  PC1PC2_df$angle[i] <- angle(x, y)
+}
+
+tmp <- PC1PC2_df[order(PC1PC2_df$angle, decreasing = T),]  
+tmp #this will be ordered counterclocwise
+
+#tmp <- PC1PC2_df[order(PC1PC2_df$angle, decreasing = F),]  
+#tmp #this will be ordered clocwise
+
+
+cuts <-  as.vector(tmp$angle[1:(length(tmp$angle)-1)])-as.vector(tmp$angle[2:length(tmp$angle)])
+cuts <- c(cuts, tmp$angle[length(tmp$angle)]+tmp$angle[1])
+cuts
+
+plot_ly(data = tmp, 
+        x = ~U1, y = ~U2, 
+        #color = ~segment, 
+        #symbol = ~species,
+        #colors = c("chocolate1", "green3", "pink","orchid", "skyblue"),
+        #colors = color_categorical_all,
+        #colors = c("indianred1", "dodgerblue", "dodgerblue"),
+        #colors = colorRampPalette(brewer.pal(name = "RdBu", n = 9))(13),
+        type = "scatter", 
+        mode = "markers", 
+        marker = list(size = 2, width=2), # controls size of points
+        text=~seq(1:nrow(tmp)), #This is that extra column we made earlier for which we will use for cell ID
+        hoverinfo="text") #When you visualize your plotly object, hovering your mouse pointer over a point shows cell names
+
+#cut_index <- which(abs(cuts) == sort(abs(cuts), decreasing = T)[2])
+#cut_index <- which(abs(cuts) == sort(abs(cuts), decreasing = T)[2])
+```
+
+
+
+```{r}
+#cut_index <- 146
+cut_index <- 757
+cut_index <- 872
+cut_index <- 382
+
+
+ifelse(cut_index == nrow(tmp), 
+       tmp2_genes <- tmp,
+       tmp2_genes <- rbind(tmp[(cut_index+1):nrow(tmp),], tmp[1:cut_index,])
+       )
+
+tmp2_genes
+#as.numeric(rownames(tmp2_genes))
+```
+
+```{r}
+htR2E_genes <- Heatmap(gene_correlation_matrix,
+        cluster_rows = F,
+        cluster_columns = F,
+        row_order =  rownames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))],
+        column_order = colnames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))])
+htR2E_genes <- draw(htR2E_genes)
+
+
+dataframe <- data.frame(gene = rownames(gene_correlation_matrix), original_order = seq(1:nrow(gene_correlation_matrix)))
+
+seriation_order <- row_order(htR2E_genes)
+
+dataframe$original_seriation_order <- seriation_order
+
+for (i in seq(1:nrow(dataframe))) {
+  dataframe$R2E_order[i] <- which(seriation_order == dataframe$original_order[i])
+}  
+
+
+```
+
+```{r, fig.height=10, fig.width=20}
+
+#we can now plot the three matrices
+ht1 <- Heatmap(gene_correlation_matrix,
+               width=3,
+        cluster_rows = F,
+        cluster_columns = F,
+        row_order = rownames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))],
+        
+        column_order = colnames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))],
+        col = rev(brewer.pal(9,"RdGy")),
+        use_raster = TRUE)
+
+
+ht2 <- Heatmap(t(scale(t(counts_VST_selectedgenes))),
+               width=3,
+        #cluster_rows = as.dendrogram(reordered_object),
+        #cluster_columns = as.dendrogram(reordered_object),
+        row_order = rownames(counts_VST_selectedgenes)[as.numeric(rownames(tmp2_genes))],
+        column_order = colnames(sample_correlation_matrix)[as.numeric(rownames(tmp_genes))],
+        col = rev(brewer.pal(11,"RdBu")),
+        use_raster = TRUE
+        
+        )
+
+ht_list = ht1 + ht2
+draw(ht_list)
+```
+
+
+```{r, fig.width=10, fig.height=7}
+hclust <- hclust(dist(gene_correlation_matrix), method = "ward.D2")
+hclust_order <- hclust$order
+
+reordered_object_genes <- stats::reorder(x=hclust,
+        wts= dataframe$R2E_order,
+        agglo.FUN = "mean" #note that package vegan needs to be loaded
+        )
+
+#reordered_object_genes <- dendextend::rotate(hclust, dataframe$R2E_order)
+
+reorder <- reordered_object_genes$order
+
+dataframe$original_reorded <- reorder
+
+for (i in seq(1:nrow(dataframe))) {
+  dataframe$R2EHCT_order[i] <- which(reorder == dataframe$original_order[i])
+} 
+
+
+Heatmap(gene_correlation_matrix, 
+        cluster_columns = F, 
+        cluster_rows = F, 
+        row_order = rownames(gene_correlation_matrix)[hclust_order],
+        column_order =  rownames(gene_correlation_matrix)[hclust_order],
+        na_col = "white", col = rev(brewer.pal(11,"RdBu"))
+        )
+
+
+Heatmap(gene_correlation_matrix, 
+        cluster_columns = F, 
+        cluster_rows = F, 
+        #row_order = rownames(gene_correlation_matrix)[reorder],
+        row_order = dataframe$gene[order(dataframe$R2E_order)],
+        column_order = dataframe$gene[order(dataframe$R2E_order)],
+        na_col = "white", col = rev(brewer.pal(11,"RdBu")))
+
+Heatmap(gene_correlation_matrix, 
+        cluster_columns = F, 
+        cluster_rows = as.dendrogram(reordered_object_genes), 
+        #row_order = rownames(gene_correlation_matrix)[reorder],
+        #row_order = dataframe$gene[order(dataframe$R2EHCT_order)],
+        column_order= dataframe$gene[order(dataframe$R2EHCT_order)],
+        na_col = "white", col = rev(brewer.pal(11,"RdBu")))
+```
+
+
+```{r, fig.height=10, fig.width=20}
+
+#we can now plot the three matrices
+ht1 <- Heatmap(gene_correlation_matrix,
+               width=3,
+        cluster_rows = as.dendrogram(reordered_object_genes),
+        #cluster_rows = T,
+        cluster_columns = as.dendrogram(reordered_object_genes),
+        #row_order = rownames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))],
+        
+        #column_order = colnames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))],
+        col = rev(brewer.pal(9,"RdGy")),
+        use_raster = TRUE)
+
+
+ht2 <- Heatmap(t(scale(t(counts_VST_selectedgenes))),
+               width=3,
+        cluster_rows = as.dendrogram(reordered_object),
+        cluster_columns = as.dendrogram(reordered_object),
+        #cluster_columns = T,
+        #row_order = rownames(counts_VST_selectedgenes)[as.numeric(rownames(tmp2_genes))],
+        #column_order = colnames(sample_correlation_matrix)[as.numeric(rownames(tmp_genes))],
+        col = rev(brewer.pal(11,"RdBu")),
+        use_raster = TRUE
+        
+        )
+
+#ht3 <- Heatmap(sample_correlation_matrix,
+#        cluster_rows = F,
+#        cluster_columns = F,
+#        row_order = rownames(sample_correlation_matrix)[as.numeric(rownames(tmp2))],
+#        column_order = colnames(sample_correlation_matrix)[as.numeric(rownames(tmp2))],
+#        col = rev(brewer.pal(9,"PiYG")))
+
+
+
+ht_list = ht1 + ht2
+draw(ht_list)
+```
+
+```{r, fig.height=10, fig.width=20}
+##plot with the TF-based segment order + clustered genes
+
+#we can now plot the three matrices
+ht1 <- Heatmap(gene_correlation_matrix,
+               width=3,
+        cluster_rows = as.dendrogram(reordered_object_genes),
+        #cluster_rows = T,
+        cluster_columns = as.dendrogram(reordered_object_genes),
+        #row_order = rownames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))],
+        
+        #column_order = colnames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))],
+        col = rev(brewer.pal(9,"RdGy")),
+        use_raster = TRUE)
+
+
+ht2 <- Heatmap(t(scale(t(counts_VST_selectedgenes))),
+               width=3,
+        cluster_rows = as.dendrogram(reordered_object),
+        #cluster_columns = as.dendrogram(reordered_object),
+        #cluster_columns = T,
+        #row_order = rownames(counts_VST_selectedgenes)[as.numeric(rownames(tmp2_genes))],
+        column_order =c("Bf_Gi_mean", "Sp_Es_mean", "Sp_Ph_mean", "Pf_Ph2_mean","Pf_Ph1_mean",  "Pf_Ph3_mean", "Pd_transition1_mean",  "Ao_oesophagus_mean", "Pd_esophagus_mean",                         "Pf_Es_mean",   "Ao_stomach_mean",   "Bf_Lv_mean",  "Sp_St1_mean", "Sp_St2_mean", "Sp_St3_mean", "Pd_transition2_mean", "Bf_Mi_mean", "Sp_St4_mean", "Pf_He1_mean",  "Pd_stomach_mean","Bf_Hd_mean", "Pf_He2_mean", "Pd_transition3_mean", "Pf_In1_mean", "Pf_In2_mean", "Ao_pyloric_mean","Sp_In1_mean",  "Pd_midgut_mean",  "Ao_A_intestine_mean",  "Ao_M_intestine_mean", "Sp_In2_mean",   "Sp_In3_mean", "Pf_In3_mean", "Pd_transition4_mean",  "Ao_P_intestine_mean", "Pd_hindgut_mean"),
+        #column_order = colnames(sample_correlation_matrix)[as.numeric(rownames(tmp_genes))],
+        col = rev(brewer.pal(11,"RdBu")),
+        use_raster = TRUE
+        
+        )
+
+
+ht_list = ht1 + ht2
+draw(ht_list)
+```
+
+
+```{r, fig.height=10, fig.width=20}
+
+#we can now plot the three matrices
+ht1 <- Heatmap(gene_correlation_matrix,
+               width=3,
+        #cluster_rows = as.dendrogram(reordered_object_genes),
+        #cluster_rows = T,
+        #cluster_columns = as.dendrogram(reordered_object_genes),
+        #row_order = rownames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))],
+        
+        #column_order = colnames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))],
+        col = rev(brewer.pal(9,"RdGy")),
+        use_raster = TRUE)
+
+
+ht2 <- Heatmap(t(scale(t(counts_VST_selectedgenes))),
+               width=3,
+       # cluster_rows = as.dendrogram(reordered_object),
+        cluster_columns = as.dendrogram(reordered_object),
+        #cluster_columns = T,
+        #row_order = rownames(counts_VST_selectedgenes)[as.numeric(rownames(tmp2_genes))],
+        #column_order = colnames(sample_correlation_matrix)[as.numeric(rownames(tmp_genes))],
+        col = rev(brewer.pal(11,"RdBu")),
+        use_raster = TRUE
+        
+        )
+
+
+
+
+ht_list = ht1 + ht2
+draw(ht_list)
+```
+
+
+```{r, fig.height= 50, fig.width= 10}
+load("Z://01_Stefano/Collaboration_Data/Annotations/dictionary_orthogroups_best_withHox_genebased.rds")
+
+counts_VST_selectedgenes_named <- counts_VST_selectedgenes
+rownames(counts_VST_selectedgenes_named) <- dictionary_orthogroups_best_withHox_genebased$Ao[match(rownames(counts_VST_selectedgenes_named) ,rownames(dictionary_orthogroups_best_withHox_genebased))]
+
+#add a column with the ocellaris description for that gene
+load("C://Users/Doctor/Desktop/RNAseq_analyses/annotation_info_NCBIEnsembl_curated_20240411.rds")
+annotation_info_Ao <- annotation_info_NCBIEnsembl
+rm(annotation_info_NCBIEnsembl)
+
+rownames(counts_VST_selectedgenes_named) <- annotation_info_Ao$merged_description[match(rownames(counts_VST_selectedgenes_named) ,annotation_info_Ao$entrez_ID)] 
+
+
+ht <- Heatmap(t(scale(t(counts_VST_selectedgenes_named))),
+               width=3,
+        cluster_rows = as.dendrogram(reordered_object_genes),
+        #cluster_rows = F,
+        #cluster_columns = as.dendrogram(reordered_object),
+        #row_order = rownames(counts_VST_selectedgenes_named)[as.numeric(rownames(tmp2_genes))],
+        #column_order = colnames(sample_correlation_matrix)[as.numeric(rownames(tmp_genes))],
+        #cluster_columns = F,
+        column_order = c("Bf_Gi_mean", "Sp_Es_mean", "Sp_Ph_mean", "Pf_Ph2_mean","Pf_Ph1_mean",  "Pf_Ph3_mean", "Pd_transition1_mean",  "Ao_oesophagus_mean", "Pd_esophagus_mean",                         "Pf_Es_mean",   "Ao_stomach_mean",   "Bf_Lv_mean",  "Sp_St1_mean", "Sp_St2_mean", "Sp_St3_mean", "Pd_transition2_mean", "Bf_Mi_mean", "Sp_St4_mean", "Pf_He1_mean",  "Pd_stomach_mean","Bf_Hd_mean", "Pf_He2_mean", "Pd_transition3_mean", "Pf_In1_mean", "Pf_In2_mean", "Ao_pyloric_mean","Sp_In1_mean",  "Pd_midgut_mean",  "Ao_A_intestine_mean",  "Ao_M_intestine_mean", "Sp_In2_mean",   "Sp_In3_mean", "Pf_In3_mean", "Pd_transition4_mean",  "Ao_P_intestine_mean", "Pd_hindgut_mean"),
+        col = rev(brewer.pal(11,"RdBu")),
+        use_raster = TRUE
+        
+        )
+
+ht
+```
+
+```{r}
+InteractiveComplexHeatmap::htShiny(ht)
+```
+
+
+```{r, fig.height=10, fig.width=20}
+
+#we can now plot the three matrices
+ht1 <- Heatmap(gene_correlation_matrix,
+               width=3,
+        cluster_rows = as.dendrogram(reordered_object_genes),
+        #cluster_rows = T,
+        cluster_columns = as.dendrogram(reordered_object_genes),
+        #row_order = rownames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))],
+        
+        #column_order = colnames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))],
+        col = rev(brewer.pal(9,"RdGy")),
+        use_raster = TRUE)
+
+
+ht2 <- Heatmap(t(scale(t(counts_VST_selectedgenes))),
+               width=3,
+        #cluster_rows = as.dendrogram(reordered_object),
+        #cluster_columns = as.dendrogram(reordered_object),
+        #cluster_columns = T,
+        #row_order = rownames(counts_VST_selectedgenes)[as.numeric(rownames(tmp2_genes))],
+        column_order = colnames(sample_correlation_matrix)[as.numeric(rownames(tmp_genes))],
+        col = rev(brewer.pal(11,"RdBu")),
+        use_raster = TRUE
+        
+        )
+
+#ht3 <- Heatmap(sample_correlation_matrix,
+#        cluster_rows = F,
+#        cluster_columns = F,
+#        row_order = rownames(sample_correlation_matrix)[as.numeric(rownames(tmp2))],
+#        column_order = colnames(sample_correlation_matrix)[as.numeric(rownames(tmp2))],
+#        col = rev(brewer.pal(9,"PiYG")))
+
+
+
+ht_list = ht1 + ht2
+draw(ht_list)
+```
+
+
+
+
+
+```{r, fig.height= 50, fig.width= 10}
+load("Z://01_Stefano/Collaboration_Data/Annotations/dictionary_orthogroups_best_withHox_genebased.rds")
+
+counts_VST_selectedgenes_named <- counts_VST_selectedgenes
+rownames(counts_VST_selectedgenes_named) <- dictionary_orthogroups_best_withHox_genebased$Ao[match(rownames(counts_VST_selectedgenes_named) ,rownames(dictionary_orthogroups_best_withHox_genebased))]
+
+#add a column with the ocellaris description for that gene
+load("C://Users/Doctor/Desktop/RNAseq_analyses/annotation_info_NCBIEnsembl_curated_20240411.rds")
+annotation_info_Ao <- annotation_info_NCBIEnsembl
+rm(annotation_info_NCBIEnsembl)
+
+rownames(counts_VST_selectedgenes_named) <- annotation_info_Ao$merged_description[match(rownames(counts_VST_selectedgenes_named) ,annotation_info_Ao$entrez_ID)] 
+
+
+ht <- Heatmap(t(scale(t(counts_VST_selectedgenes_named))),
+               width=3,
+        #cluster_rows = as.dendrogram(reordered_object_genes),
+        #cluster_rows = F,
+        #cluster_columns = as.dendrogram(reordered_object),
+        row_order = rownames(counts_VST_selectedgenes_named)[as.numeric(rownames(tmp2_genes))],
+        column_order = colnames(sample_correlation_matrix)[as.numeric(rownames(tmp_genes))],
+        #cluster_columns = F,
+        #column_order = c("Bf_Gi_mean", "Sp_Es_mean", "Sp_Ph_mean", "Pf_Ph2_mean","Pf_Ph1_mean",  "Pf_Ph3_mean", "Pd_transition1_mean",  "Ao_oesophagus_mean", "Pd_esophagus_mean",                         "Pf_Es_mean",   "Ao_stomach_mean",   "Bf_Lv_mean",  "Sp_St1_mean", "Sp_St2_mean", "Sp_St3_mean", "Pd_transition2_mean", "Bf_Mi_mean", "Sp_St4_mean", "Pf_He1_mean",  "Pd_stomach_mean","Bf_Hd_mean", "Pf_He2_mean", "Pd_transition3_mean", "Pf_In1_mean", "Pf_In2_mean", "Ao_pyloric_mean","Sp_In1_mean",  "Pd_midgut_mean",  "Ao_A_intestine_mean",  "Ao_M_intestine_mean", "Sp_In2_mean",   "Sp_In3_mean", "Pf_In3_mean", "Pd_transition4_mean",  "Ao_P_intestine_mean", "Pd_hindgut_mean"),
+        col = rev(brewer.pal(11,"RdBu")),
+        use_raster = TRUE
+        
+        )
+
+ht
+```
+
+```{r}
+InteractiveComplexHeatmap::htShiny(ht)
+```
+
+
+```{r}
+dictionary_aoce <- get(load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Aoce_dictionary_standard.rds"))
+
+dataframe <- data.frame(orthogroup = rownames(counts_VST_selectedgenes)[as.numeric(rownames(tmp2_genes))],
+                        gene_ID = dictionary_orthogroups_best_withHox_genebased$Ao[match(rownames(counts_VST_selectedgenes)[as.numeric(rownames(tmp2_genes))] ,rownames(dictionary_orthogroups_best_withHox_genebased))],
+                        description = rownames(counts_VST_selectedgenes_named)[as.numeric(rownames(tmp2_genes))])
+
+dataframe$symbol <- dictionary_aoce$symbol[match(dataframe$gene_ID,dictionary_aoce$geneID)]
+
+write.csv(dataframe,"Z://01_Stefano/Collaboration_Data/Annotations/unbiased_gut_notTF_ordered.csv",row.names = FALSE)
+
+```
+
+
+
+```{r, fig.width=10, fig.height=600}
+Heatmap(t(scale(t(counts_VST_selectedgenes_named))),
+               width=3,
+        cluster_rows = F,
+        cluster_columns = F,
+        row_order = rownames(counts_VST_selectedgenes_named)[as.numeric(rownames(tmp2_genes))],
+        column_order = colnames(sample_correlation_matrix)[as.numeric(rownames(tmp_genes))],
+        col = rev(brewer.pal(11,"RdBu")),
+        use_raster = TRUE
+        
+        )
+```
+
+
+#### global gene enrichment
+
+```{r}
+#get ordered list by orthogroup
+ordered_orthogroups <- rownames(counts_VST_selectedgenes)[as.numeric(rownames(tmp2_genes))]
+#replace with best gene  representative
+ordered_genes <-dictionary_orthogroups_best_withHox_genebased$Ao[match(ordered_orthogroups,rownames(dictionary_orthogroups_best_withHox_genebased))]
+```
+
+```{r}
+#we will need to convert to ensembl
+ordered_genes_Ensembl <- annotation_info_Ao$ensembl_ID[match(ordered_genes,annotation_info_Ao$entrez_ID)]
+```
+
+```{r}
+ordered_genes_Ensembl <- na.omit(ordered_genes_Ensembl) #2224
+```
+
+
+```{r}
+load("C://Users/Doctor/Desktop/RNAseq_analyses/annotation_info_NCBIEnsembl_curated_20240411.rds")
+annotation_info <- annotation_info_NCBIEnsembl
+rm(annotation_info_NCBIEnsembl)
+
+# uncomment if not run this earlier in the code and object "ensembl" does not exist
+require(biomaRt)
+ensembl <- useMart('ensembl', dataset = 'aocellaris_gene_ensembl', host="https://useast.ensembl.org",)
+#tab_GO
+GO_annotations <- getBM(attributes = c("ensembl_gene_id", 'namespace_1003', "go_id", "name_1006"),
+                        mart = ensembl)
+#only keep genes annotated for Biological Process GO terms
+GO_annotations <- subset(GO_annotations, (namespace_1003 %in% "biological_process"))
+
+#let us also add a column with the descriptions from our annotation_info file
+GO_annotations$description <- annotation_info$merged_description[match(GO_annotations$ensembl_gene_id, annotation_info$ensembl_ID)]
+```
+
+```{r, fig.width=8, fig.height=8, echo=FALSE}
+#but try also clusterprofiler
+#Groups of genes identified by some analyses are used as input list to the mgsa function from the mgsa package13
+#(with parameters restarts=3 and steps=1e7).
+
+#The model assumes that some sets to be inferred are active and that all genes member of active sets are themselves active. Active genes are more likely to belong to the observations and inactive genes not. Fitting the model amounts to infer the probability of every set to be active given the observations.
+#Classical methods analyze each set in isolation. Because sets such as biological pathways often share genes with each other, the returned list of enriched sets is usually long and redundant. In contrast, MGSA takes set overlap into account by working on all sets simultaneously and substantially reduces the number of redundant sets.
+
+#e.g. take list of DE genes S1/S2 [== example_o]
+# take list of GO terms (obtained previously) [== example_go]
+#myset = new( "MgsaSets", sets=list(set1=LETTERS[1:3], set2=LETTERS[2:5]) )
+
+
+#prepare table where each column is a GO:pathwayID and entries are the genes that belong to that group
+GO_annotations_wide <- GO_annotations[, c("ensembl_gene_id", "go_id")]
+GO_annotations_wide$id <- seq.int(nrow(GO_annotations_wide))
+GO_annotations_wide <- GO_annotations_wide %>% pivot_wider(names_from = go_id, values_from = ensembl_gene_id)
+
+#only keep GO groups with at least 4 genes and max 500
+GO_annotations_wide <- GO_annotations_wide %>% select_if(~ sum(!is.na(.)) > 4 & sum(!is.na(.)) < 500)
+
+#replace GO codes with full names so the results are easier to interpret
+tmp <- GO_annotations[, c("name_1006", "go_id")]
+tmp <- tmp[!duplicated(tmp),]
+
+colnames(GO_annotations_wide) <- tmp$name_1006[tmp$go_id %in% colnames(GO_annotations_wide)]
+rm(tmp)
+
+
+```
+
+
+```{r}
+#run the mgsa function
+MGSA_result = mgsa(ordered_genes_Ensembl, #this is a list of genes previously obtained during the DE analysis
+                   #should maybe just take upregulated in one stage  and upregulated in the other, separatedly
+                   GO_annotations_wide, 
+                   restarts=5,  
+                   steps=1e7)
+
+#show the ordered list of gene sets found
+setsResults(MGSA_result)[order(setsResults(MGSA_result)$estimate, decreasing = TRUE),][1:25,]
+#plot(MGSA_result)
+
+#The model have three parameters:
+# α, the false positive rate i.e. the probability of an inactive gene to actually be observed;
+# β, the false negative rate i.e. the probability of an active gene to actually be not observed;
+# p, the prior probability for any set to be active, a typically small number ensuring sparse solutions to be inferred
+
+#res = setsResults(MGSA_result)
+#subset(res, estimate > 0.5)
+```
+
+<br/> Below, for reference, the scoring of all Gene Ontology gene sets considered, and the hyperparameters of the model ( _alpha_ , _beta_, and indirectly _p_ ):
+
+```{r, echo=FALSE, fig.width=9, fig.height=9, warning=FALSE}
+#for customisation purposes, let us try to obtain the same plots as plot(MGSA_result)
+
+#set space for 4 plots
+par(mfrow=c(2,2))
+
+##p, alpha, beta hyperparameters of the model
+## Note this is the information that would be extracted from the original bottom 3 plots
+
+# average number of gene sets expected to be active: p* number of gene sets considered
+pPost <- (pPost(MGSA_result)[which.max(pPost(MGSA_result)$estimate), ]$value)*dim(MGSA_result@setsResults)[1]
+# most likely alpha parameter of the model (false positive)
+pAlpha <- alphaPost(MGSA_result)[which.max(pPost(MGSA_result)$estimate), ]$value
+# most likely beta parameter of the model (false negative rate)
+pBeta <- betaPost(MGSA_result)[which.max(pPost(MGSA_result)$estimate), ]$value
+
+title <- paste0("MGSA analysis: \n \n expected active gene sets: ",pPost,"\n alpha (false positives): ", pAlpha, "\n beta (false negatives): ",pBeta)
+
+# TEXT
+plot(1:100, type="n", xaxt="n", yaxt="n", bty="n", xlab="", ylab="")
+text(x=50, y=50, title , cex=1.2)
+
+## DOTPLOT
+
+tmp <- data.frame(go_id = colnames(GO_annotations_wide), estimate =MGSA_result@setsResults[["estimate"]])
+# sort(tmp$estimate, index.return=TRUE, decreasing=TRUE)$ix[1:10] #returns the index of the top 10 scoring sets
+
+plot(seq(1:dim(tmp)[1]),
+     tmp$estimate,
+     xlab="",
+     ylab="Posterior Probability of activation",
+     #ylim=c(0,3.6),
+     xaxt = "n", #remove x axis tikmarks
+     #las=1, #this is ignored if defining labels later
+     pch=16,
+     cex=1,
+     col = ifelse(seq(1:dim(tmp)[1]) %in% sort(tmp$estimate, index.return=TRUE, decreasing=TRUE)$ix[1:10], "dodgerblue", alpha ("black", 0.3))
+     )
+axis(1, sort(tmp$estimate, index.return=TRUE, decreasing=TRUE)$ix[1:10],las=2, cex.axis=0.5, font=2, labels = colnames(GO_annotations_wide)[sort(tmp$estimate, index.return=TRUE, decreasing=TRUE)$ix[1:10]])
+title("Posterior probabilities of activation")
+abline(h=0.5,col="grey")
+#text(sort(tmp$estimate, index.return=TRUE, decreasing=TRUE)$ix[1:10], tmp$estimate[sort(tmp$estimate, index.return=TRUE, decreasing=TRUE)$ix[1:10]]-0.04, labels=colnames(GO_annotations_wide)[sort(tmp$estimate, index.return=TRUE, decreasing=TRUE)$ix[1:10]], cex=0.7)
+
+#DENSITY PLOT
+
+plot(density(tmp$estimate),
+     col= "dodgerblue",
+     lwd= 2,
+     main="",
+     xlab="Posterior probability of activation",
+     ylab="Number of GO sets \n with given probability",
+     #ylim=range(pretty(c(0, 1)))
+     )
+abline(v=0.5,col="grey")
+title("Distribution of posterior activation probabilities")
+
+#BARPLOT
+
+sorted_tmp <- tmp
+sorted_tmp$sd <- MGSA_result@setsResults[["std.error"]]
+sorted_tmp$index <- seq(1:dim(sorted_tmp)[1])
+sorted_tmp <- sorted_tmp[order(sorted_tmp$estimate, decreasing = TRUE),]
+#sorted_tmp <- as.data.frame(sort(sorted_tmp$estimate, index.return=TRUE, decreasing=TRUE))
+sorted_tmp$rank <- seq(1:dim(sorted_tmp)[1])
+#colnames(sorted_tmp) <- c("estimate", "index", "rank")
+
+plot(sorted_tmp[1:20,]$estimate,
+     sorted_tmp[1:20,]$rank,
+     xlab="Posterior Probability of activation \n +/- Standard Error",
+     ylab="",
+     #ylim=c(1,20),
+     ylim = rev(range(sorted_tmp[1:20,]$rank)), #so that higher ranks (lower positions) are at the bottom
+     yaxt = "n", #remove x axis tikmarks
+     #las=1, #this is ignored if defining labels later
+     pch=16,
+     cex=1,
+     col = ifelse(sorted_tmp$index %in% sort(tmp$estimate, index.return=TRUE, decreasing=TRUE)$ix[1:10], "dodgerblue", alpha ("black", 1))
+     )
+axis(2, sorted_tmp[1:20,]$rank,las=2, 
+     cex.axis=0.5, 
+     font=2, 
+     labels = colnames(GO_annotations_wide)[sorted_tmp[1:20,]$index])
+title("Posterior probabilities of activation")
+# Add error bars
+#https://www.benjaminbell.co.uk/2019/04/how-to-add-error-bars-in-r.html
+arrows(x0=sorted_tmp[1:20,]$estimate - sorted_tmp[1:20,]$sd, 
+       y0=sorted_tmp[1:20,]$rank, 
+       x1=sorted_tmp[1:20,]$estimate+ sorted_tmp[1:20,]$sd, 
+       y1=sorted_tmp[1:20,]$rank, 
+       code=3, 
+       angle=90, 
+       length=0.1,
+       col = "gray")
+
+```
+
+<br/> For the top scoring pathways, below the list of the actual genes belonging to that pathway that were found in our list of differentially-expressed genes:
+
+
+```{r, echo=FALSE}
+#for the top pathways, print the genes that have been found amongst DE
+#sorted_tmp[1:5,1] #is the colnames of GO-annotation_wide we have to extract gene codes from
+
+#for each of the top (e.g.) 15 ranking GO pathways
+for (i in seq(1:25)) {
+  pathway_genes <- GO_annotations_wide[,sorted_tmp[i,1]][!is.na(GO_annotations_wide[,sorted_tmp[i,1]])] #take the pathway with that label, and the genes that belong to it (i.e. the non-NA entries)
+  expressed <- intersect(pathway_genes, ordered_genes_Ensembl) #find which of all pathways genes are actually those found amongst DE genes
+  #print(top_table[top_table$ensembl_gene_id %in% expressed, c("FC", "adj.P.Val", "ensembl_gene_id", "description", "AveExpr", "CI.L", "CI.R")])
+  print(kable(annotation_info_Ao[annotation_info_Ao$ensembl_ID %in% expressed, c("entrez_ID", "ensembl_ID", "merged_symbol", "merged_description") ], 
+              caption= paste0("Genes of GO set:[",sorted_tmp[i,1],"] present amonst genes of interest")))
+  
+}
+     
+```
+
+
+```{r,fig.width=10, fig.height=10}
+
+#for each of the top (e.g.) 15 ranking GO pathways
+for (i in seq(1:25)) {
+  pathway_genes <- GO_annotations_wide[,sorted_tmp[i,1]][!is.na(GO_annotations_wide[,sorted_tmp[i,1]])] #take the pathway with that label, and the genes that belong to it (i.e. the non-NA entries)
+  expressed <- intersect(pathway_genes, ordered_genes_Ensembl) 
+  
+  expressed <- annotation_info_Ao$entrez_ID[match(expressed,annotation_info_Ao$ensembl_ID)]
+expressed_OG <- rownames(dictionary_orthogroups_best_withHox_genebased[match(expressed,dictionary_orthogroups_best_withHox_genebased$Ao),])
+
+#counts_VST_tmp <- counts_VST_selectedgenes[rownames(counts_VST_selectedgenes) %in% expressed_OG,]
+
+counts_VST_tmp <- zmerged_counts_all[rownames(zmerged_counts_all) %in% expressed_OG,]
+
+
+
+rownames(counts_VST_tmp) <- dictionary_orthogroups_best_withHox_genebased$Ao[match(rownames(counts_VST_tmp) ,rownames(dictionary_orthogroups_best_withHox_genebased))]
+
+#add a column with the ocellaris description for that gene
+rownames(counts_VST_tmp) <- annotation_info_Ao$merged_description[match(rownames(counts_VST_tmp) ,annotation_info_Ao$entrez_ID)] 
+
+
+
+htmp <- Heatmap(as.matrix(counts_VST_tmp),
+                column_title = paste0("GO set:[",sorted_tmp[i,1],"]"),
+        cluster_columns = F,
+        column_split = factor(merged_metadata_all$species, levels=c("Pd","Sp", "Pf", "Bf", "Ao")),
+        col = rev(brewer.pal(11,"RdBu"))
+        )
+
+plot(htmp)
+  
+  
+}
+
+
+```
+
+
+```{r,fig.width=10, fig.height=10}
+
+#for each of the top (e.g.) 15 ranking GO pathways
+for (i in seq(1:25)) {
+  pathway_genes <- GO_annotations_wide[,sorted_tmp[i,1]][!is.na(GO_annotations_wide[,sorted_tmp[i,1]])] #take the pathway with that label, and the genes that belong to it (i.e. the non-NA entries)
+  expressed <- intersect(pathway_genes, ordered_genes_Ensembl) 
+  
+  expressed <- annotation_info_Ao$entrez_ID[match(expressed,annotation_info_Ao$ensembl_ID)]
+expressed_OG <- rownames(dictionary_orthogroups_best_withHox_genebased[match(expressed,dictionary_orthogroups_best_withHox_genebased$Ao),])
+
+#counts_VST_tmp <- counts_VST_selectedgenes[rownames(counts_VST_selectedgenes) %in% expressed_OG,]
+
+counts_VST_tmp <- zmerged_counts_all[rownames(zmerged_counts_all) %in% expressed_OG,]
+
+
+
+rownames(counts_VST_tmp) <- dictionary_orthogroups_best_withHox_genebased$Ao[match(rownames(counts_VST_tmp) ,rownames(dictionary_orthogroups_best_withHox_genebased))]
+
+#add a column with the ocellaris description for that gene
+rownames(counts_VST_tmp) <- annotation_info_Ao$merged_description[match(rownames(counts_VST_tmp) ,annotation_info_Ao$entrez_ID)] 
+
+pdf(file=paste0("Z://01_Stefano/Collaboration_Data/Figure_elements/nonTF_enrichedGOs_heatmaps_",i, ".pdf"))
+
+htmp <- Heatmap(as.matrix(counts_VST_tmp),
+                column_title = paste0("GO set:[",sorted_tmp[i,1],"]"),
+        cluster_columns = F,
+        column_split = factor(merged_metadata_all$species, levels=c("Pd","Sp", "Pf", "Bf", "Ao")),
+        col = rev(brewer.pal(11,"RdBu"))
+        )
+
+plot(htmp)
+dev.off()  
+  
+}
+
+
+```
+
+
+
+
+
+
+### PCA
+
+```{r}
+
+#we can now calculate PCA (on the top 2000 genes)
+PCAobject_top2000 <- prcomp(x=counts_VST_top2000_transposed, center = T, scale. = T)
+
+# Plot Scree Plot of our data "WHY WE USE STANDART DEV^2? WHAT IS 100, WHAT IS 2?
+{barplot(round(PCAobject_top2000$sdev^2/sum(PCAobject_top2000$sdev^2)*100,2),
+         las=2,
+         names.arg=colnames(PCAobject_top2000$x),
+         ylab="% Variance explained",
+         xlab="PCA principal components",
+         ylim =range(pretty(c(0, 35))),
+         xlim = c(0,25),
+         main = "Scree plot (top 2500 non-TFs)"
+         )
+abline(h=100/length(colnames(PCAobject_top2000$x)), lty=2, col="dodgerblue")}
+
+
+```
+```{r}
+pdf(file="Z://01_Stefano/Collaboration_Data/Figure_elements/nonTF_PCA.pdf")
+
+{barplot(round(PCAobject_top2000$sdev^2/sum(PCAobject_top2000$sdev^2)*100,2),
+         las=2,
+         names.arg=colnames(PCAobject_top2000$x),
+         ylab="% Variance explained",
+         xlab="PCA principal components",
+         ylim =range(pretty(c(0, 35))),
+         xlim = c(0,25),
+         main = "Scree plot (277common transcription factors)"
+         )
+abline(h=100/length(colnames(PCAobject_top2000$x)), lty=2, col="dodgerblue")}
+
+dev.off()
+```
+
+
+```{r}
+#find cumulative variance explained 
+round(cumsum((PCAobject_top2000$sdev^2/sum(PCAobject_top2000$sdev^2)*100)),2)
+```
+
+
+```{r, fig.width= 12, fig.height=9, echo=FALSE}
+## PCA (segment colour code)
+#View(PCAobject_top2000$x)
+#View(PCAobject_top2000)
+#check the proportion of variance value
+#view (summary(PCAobject_top2000)$importance)
+#View(sample_metadata)
+# we will use ggplot, so we need to add a column with the sample names to our data
+PCAobject_top2000_ggplot <- merge(as.data.frame(PCAobject_top2000$x),
+                                  merged_metadata, #we are merging with a dataframe that has a column "segment" and "replicate" for each sample
+                                  by=0)
+
+
+plot1a <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC2,colour=species, shape=species ))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+plot1b <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC2,colour=segment, shape=species ))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+
+
+plot2a <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC2,colour=species, shape=species))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22 ))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC3 (", round(summary(PCAobject_top2000)$importance[8]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+
+plot2b <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC2,colour=segment, shape=replicate))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22 ))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC3 (", round(summary(PCAobject_top2000)$importance[8]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+
+plot3a <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC4,colour=species, shape=species))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  theme_classic()+ theme(legend.position="right")
+
+plot3b <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC4,colour=segment, shape=replicate))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  theme_classic()+ theme(legend.position="right")
+
+
+
+grid.arrange(plot1a, plot1b, 
+             plot2a, plot2b,
+             plot3a, plot3b,
+             ncol=2, nrow=3)
+
+#remove unused variables
+#rm(plot1, plot2, plot3)
+
+```
+
+```{r}
+color_categorical_segment <- c("skyblue2", "dodgerblue", "goldenrod2", "goldenrod1", "magenta", "orchid",
+                               "skyblue2", "indianred", "goldenrod1", "orchid",
+                               "skyblue2", "skyblue2", "skyblue2", "dodgerblue", "indianred", "indianred", "magenta", "magenta", "orchid",
+                               "skyblue2", "dodgerblue", "goldenrod2", "goldenrod1", "goldenrod1","goldenrod1", "magenta","magenta", "orchid",
+                               "skyblue2", "dodgerblue", "goldenrod2", "goldenrod1", "magenta", "magenta", "orchid", "orchid")
+names(color_categorical_segment) <- paste0(unique(merged_metadata$segment), "_mean")
+color_categorical_segment_named <- color_categorical_segment
+```
+
+
+```{r, fig.height=8, fig.width=8}
+image <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC2,colour=segment, shape=species ))+
+  geom_point(size=4)+
+  scale_color_manual(values = unname(color_categorical_segment))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-20, 20)+
+  #ylim(-100, 100)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="bottom")
+
+plot(image)
+
+```
+```{r}
+pdf(file="Z://01_Stefano/Collaboration_Data/Figure_elements/nonTF_PCA.pdf")
+
+plot(image)
+
+dev.off()
+```
+```{r, fig.height=4, fig.width=4}
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC3,colour=segment, shape=species ))+
+  geom_point(size=4)+
+  scale_color_manual(values = unname(color_categorical_segment))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-20, 20)+
+  #ylim(-100, 100)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="none")
+
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC4,colour=segment, shape=species ))+
+  geom_point(size=4)+
+  scale_color_manual(values = unname(color_categorical_segment))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-20, 20)+
+  #ylim(-100, 100)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="none")
+
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC5,colour=segment, shape=species ))+
+  geom_point(size=4)+
+  scale_color_manual(values = unname(color_categorical_segment))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-20, 20)+
+  #ylim(-100, 100)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="none")
+
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC6,colour=segment, shape=species ))+
+  geom_point(size=4)+
+  scale_color_manual(values = unname(color_categorical_segment))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-20, 20)+
+  #ylim(-100, 100)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="none")
+
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC7,colour=segment, shape=species ))+
+  geom_point(size=4)+
+  scale_color_manual(values = unname(color_categorical_segment))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-20, 20)+
+  #ylim(-100, 100)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="none")
+
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC8,colour=segment, shape=species ))+
+  geom_point(size=4)+
+  scale_color_manual(values = unname(color_categorical_segment))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-20, 20)+
+  #ylim(-100, 100)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="none")
+
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC9,colour=segment, shape=species ))+
+  geom_point(size=4)+
+  scale_color_manual(values = unname(color_categorical_segment))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-20, 20)+
+  #ylim(-100, 100)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="none")
+
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC10,colour=segment, shape=species ))+
+  geom_point(size=4)+
+  scale_color_manual(values = unname(color_categorical_segment))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-20, 20)+
+  #ylim(-100, 100)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="none")
+
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC11,colour=segment, shape=species ))+
+  geom_point(size=4)+
+  scale_color_manual(values = unname(color_categorical_segment))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-20, 20)+
+  #ylim(-100, 100)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="none")
+
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC12,colour=segment, shape=species ))+
+  geom_point(size=4)+
+  scale_color_manual(values = unname(color_categorical_segment))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-20, 20)+
+  #ylim(-100, 100)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="none")
+
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC13,colour=segment, shape=species ))+
+  geom_point(size=4)+
+  scale_color_manual(values = unname(color_categorical_segment))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-20, 20)+
+  #ylim(-100, 100)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="none")
+
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC14,colour=segment, shape=species ))+
+  geom_point(size=4)+
+  scale_color_manual(values = unname(color_categorical_segment))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-20, 20)+
+  #ylim(-100, 100)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="none")
+
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC15,colour=segment, shape=species ))+
+  geom_point(size=4)+
+  scale_color_manual(values = unname(color_categorical_segment))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-20, 20)+
+  #ylim(-100, 100)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="none")
+
+```
+
+

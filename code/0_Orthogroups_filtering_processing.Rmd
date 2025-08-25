@@ -1,0 +1,2518 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(magrittr)
+library(dplyr)
+library(protr)
+library(makeunique)
+library(ggplot2)
+library(formattable)
+library(gridExtra)
+library(plotly)
+library(ComplexHeatmap)
+library(formattable)
+library(tidyr)
+library(RColorBrewer)
+
+```
+
+
+## Preliminary notes
+
+
+```{r}
+##NO NEED TO RERUN, LOAD DIRECTLY OUTPUT FILE WHEN NEEDED
+
+##preparation of Pdum deduplicated dictionary
+#the fasta list of longest isoforms is saved in "Z:\01_Stefano\Collaboration_Data\Annotations\Proteomes\Pd_deduplicated.fasta"
+#extract headers with wsl
+#awk 'sub(/^>/, "")' Pd_deduplicated.fasta > Pd_deduplicated_protein_codes.txt
+#awk 'sub(/^>/, "")' platynereisv2.1.singleisoform.fasta > Pd_deduplicated_protein_codes_v2.txt
+
+Pd_deduplicated_protein_codes <- read.csv("Z://01_Stefano/Collaboration_Data/Annotations/Proteomes/Pd_deduplicated_protein_codes_v2.txt", sep = " ")
+Pd_deduplicated_protein_codes <- Pd_deduplicated_protein_codes[[1]] #28982
+dictionary_pd <-  read_excel("Z://01_Stefano/Collaboration_Data/Annotations/Pd_dictionary.xlsx") #166237
+
+#subset original dictionary to only keep entries of longest isoform
+Pdum_dictionary_deduplicated <- dictionary_pd
+Pdum_dictionary_deduplicated <- Pdum_dictionary_deduplicated[Pdum_dictionary_deduplicated$transcript_id %in% gsub("\\..*","",Pd_deduplicated_protein_codes),]#28982
+
+#write.csv(Pdum_dictionary_deduplicated, "Z://01_Stefano/Collaboration_Data/Annotations/Pdum_dictionary_deduplicated.csv",  row.names=FALSE)
+#write.csv(Pdum_dictionary_deduplicated, "Z://01_Stefano/Collaboration_Data/Annotations/Pdum_dictionary_deduplicated_v2.csv",  row.names=FALSE)
+```
+
+
+### List all TF OGs
+
+```{r}
+#load the original orthofinder results table
+#load orthogroup table
+dictionary_orthogroups <- read.table(file = "Z://01_Stefano/Collaboration_Data/Annotations/Results_Nov01/Orthogroups/Orthogroups.tsv", sep = '\t', header = TRUE)
+#fill empty cells with NA
+dictionary_orthogroups <- dictionary_orthogroups %>% mutate_all(na_if,"")
+rownames(dictionary_orthogroups) <- dictionary_orthogroups$Orthogroup
+dictionary_orthogroups <- dictionary_orthogroups[,2:ncol(dictionary_orthogroups)]
+dictionary_orthogroups$OG <- rownames(dictionary_orthogroups)
+
+dictionary_orthogroups_unlisted_Ao <- dictionary_orthogroups %>% separate_rows("Ao", sep = ", ")
+dictionary_orthogroups_unlisted_Bf <- dictionary_orthogroups %>% separate_rows("Bf", sep = ", ")
+dictionary_orthogroups_unlisted_Pf <- dictionary_orthogroups %>% separate_rows("Pf", sep = ", ")
+dictionary_orthogroups_unlisted_Sp <- dictionary_orthogroups %>% separate_rows("Sp", sep = ", ")
+dictionary_orthogroups_unlisted_Pd <- dictionary_orthogroups %>% separate_rows("Pd", sep = ", ")
+
+#load hmmsearch TF lists for each species
+
+hmsearch_TFs_Ao <- read_excel("Z://01_Stefano/Collaboration_Data/Annotations/TFs/Ao_TF_ID.xlsx") 
+hmsearch_TFs_Bf <- read_excel("Z://01_Stefano/Collaboration_Data/Annotations/TFs/Bf_TF_ID.xlsx") 
+hmsearch_TFs_Pf <- read_excel("Z://01_Stefano/Collaboration_Data/Annotations/TFs/Pf_TF_ID.xlsx") 
+hmsearch_TFs_Sp <- read_excel("Z://01_Stefano/Collaboration_Data/Annotations/TFs/Sp_TF_ID.xlsx") 
+hmsearch_TFs_Pd <- read_excel("Z://01_Stefano/Collaboration_Data/Annotations/TFs/Pd_TF_ID.xlsx") 
+
+
+hmsearch_TFs_list_Ao <- unique(unlist(hmsearch_TFs_Ao[1])) #1778 unique proteins
+hmsearch_TFs_list_Bf <- unique(unlist(hmsearch_TFs_Bf[1])) #1931 proteins
+hmsearch_TFs_list_Pf <- unique(unlist(hmsearch_TFs_Pf[1])) #1339 proteins
+hmsearch_TFs_list_Sp <- unique(unlist(hmsearch_TFs_Sp[1])) #994 proteins
+hmsearch_TFs_list_Pd <- unique(unlist(hmsearch_TFs_Pd[1])) #1425 proteins
+
+#find matching orthogroup
+TF_OGs_Ao <- dictionary_orthogroups_unlisted_Ao$OG[match(hmsearch_TFs_list_Ao,dictionary_orthogroups_unlisted_Ao$Ao)]
+summary(is.na(TF_OGs_Ao)) #these are proteins not included in the final Orthofinder summary table... maybe could not be used #1778 -> 1706
+TF_noOG_Ao <- hmsearch_TFs_list_Ao[is.na(TF_OGs_Ao)] #we save the TF proteins that will get left out because they have no OG #72
+
+TF_OGs_Bf <- dictionary_orthogroups_unlisted_Bf$OG[match(hmsearch_TFs_list_Bf,dictionary_orthogroups_unlisted_Bf$Bf)]
+summary(is.na(TF_OGs_Bf)) #1931 -> 1795
+TF_noOG_Bf <- hmsearch_TFs_list_Bf[is.na(TF_OGs_Bf)] #we save the TF proteins that will get left out because they have no OG #136
+
+TF_OGs_Pf <- dictionary_orthogroups_unlisted_Pf$OG[match(hmsearch_TFs_list_Pf,dictionary_orthogroups_unlisted_Pf$Pf)]
+summary(is.na(TF_OGs_Pf)) #1339 -> 1234
+TF_noOG_Pf <- hmsearch_TFs_list_Pf[is.na(TF_OGs_Pf)] #we save the TF proteins that will get left out because they have no OG #105
+
+TF_OGs_Sp <- dictionary_orthogroups_unlisted_Sp$OG[match(hmsearch_TFs_list_Sp,gsub("\\..*","",dictionary_orthogroups_unlisted_Sp$Sp))]
+summary(is.na(TF_OGs_Sp)) #994 -> 908
+TF_noOG_Sp <- hmsearch_TFs_list_Sp[is.na(TF_OGs_Sp)] #we save the TF proteins that will get left out because they have no OG #86
+
+TF_OGs_Pd <- dictionary_orthogroups_unlisted_Pd$OG[match(hmsearch_TFs_list_Pd,gsub("\\..*","",dictionary_orthogroups_unlisted_Pd$Pd))]
+summary(is.na(TF_OGs_Pd)) #1425 -> 1250
+TF_noOG_Pd <- hmsearch_TFs_list_Pd[is.na(TF_OGs_Pd)] #we save the TF proteins that will get left out because they have no OG #175
+
+#summarise to same orthogroups
+TF_OGs_Ao <- unique(na.omit(TF_OGs_Ao)) #834
+TF_OGs_Bf <- unique(na.omit(TF_OGs_Bf)) #660
+TF_OGs_Pf <- unique(na.omit(TF_OGs_Pf)) #671
+TF_OGs_Sp <- unique(na.omit(TF_OGs_Sp)) #587
+TF_OGs_Pd <- unique(na.omit(TF_OGs_Pd)) #626
+
+#create combined list
+all_TF_orthogroups <- unique(c(TF_OGs_Ao,TF_OGs_Bf,TF_OGs_Pf,TF_OGs_Sp,TF_OGs_Pd)) #1418
+all_TF_orthogroups_withHox <- c(all_TF_orthogroups, c("OG000PG01",   "OG000PG02",   "OG000PG0304" ,"OG000PG05" ,  "OG000PG0607", "OG000PG08",   "OG000PG0910", "OG000PG1115")) #1418+8 = 1426
+
+#save(all_TF_orthogroups_withHox, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/all_TF_orthogroups_withHox.rds")
+#save(TF_noOG_Ao, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_noOG_Ao.rds")
+#save(TF_noOG_Bf, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_noOG_Bf.rds")
+#save(TF_noOG_Pf, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_noOG_Pf.rds")
+#save(TF_noOG_Sp, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_noOG_Sp.rds")
+#save(TF_noOG_Pd, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_noOG_Pd.rds")
+```
+
+
+```{r}
+
+##now collect the TF numbers in each species, based on this new inclusive/expanded definition
+load("Z://01_Stefano/Collaboration_Data/Annotations/TFs/all_TF_orthogroups_withHox.rds")
+
+
+expanded_TFs_Ao <- unique(na.omit(dictionary_orthogroups_unlisted_Ao$Ao[dictionary_orthogroups_unlisted_Ao$OG %in% all_TF_orthogroups_withHox])) #1854
+expanded_TFs_Bf <- unique(na.omit(dictionary_orthogroups_unlisted_Bf$Bf[dictionary_orthogroups_unlisted_Bf$OG %in% all_TF_orthogroups_withHox])) #2141
+expanded_TFs_Pf <- unique(na.omit(dictionary_orthogroups_unlisted_Pf$Pf[dictionary_orthogroups_unlisted_Pf$OG %in% all_TF_orthogroups_withHox])) #1807
+expanded_TFs_Sp <- unique(na.omit(dictionary_orthogroups_unlisted_Sp$Sp[dictionary_orthogroups_unlisted_Sp$OG %in% all_TF_orthogroups_withHox])) #1234
+expanded_TFs_Pd <- unique(na.omit(dictionary_orthogroups_unlisted_Pd$Pd[dictionary_orthogroups_unlisted_Pd$OG %in% all_TF_orthogroups_withHox])) #1654
+
+##add the transcription factors that had no orthogroup
+expanded_TFs_Ao <- unique(c(expanded_TFs_Ao, TF_noOG_Ao)) #1854+72 -> 1926
+expanded_TFs_Bf <- unique(c(expanded_TFs_Bf, TF_noOG_Bf)) #2141+136 -> 2277
+expanded_TFs_Pf <- unique(c(expanded_TFs_Pf, TF_noOG_Pf))#1807+105 -> 1912
+expanded_TFs_Sp <- unique(c(expanded_TFs_Sp, TF_noOG_Sp)) #1234+86 -> 1320
+expanded_TFs_Pd <- unique(c(expanded_TFs_Pd, TF_noOG_Pd))#1654+175 -> 1829
+
+
+#find matching orthogroup (of course, this will not find an orthogroup for the species-specific ones we added)
+TF_OGs_Ao <- dictionary_orthogroups_unlisted_Ao$OG[match(expanded_TFs_Ao,dictionary_orthogroups_unlisted_Ao$Ao)]
+summary(is.na(TF_OGs_Ao))  #1926 -> 1854 YES + 72 NO
+TF_OGs_Bf <- dictionary_orthogroups_unlisted_Bf$OG[match(expanded_TFs_Bf,dictionary_orthogroups_unlisted_Bf$Bf)]
+summary(is.na(TF_OGs_Bf)) #2277 -> 2141 YES + 136 NO
+TF_OGs_Pf <- dictionary_orthogroups_unlisted_Pf$OG[match(expanded_TFs_Pf,dictionary_orthogroups_unlisted_Pf$Pf)]
+summary(is.na(TF_OGs_Pf)) #1912 -> 1807 YES + 105 NO
+TF_OGs_Sp <- dictionary_orthogroups_unlisted_Sp$OG[match(expanded_TFs_Sp,dictionary_orthogroups_unlisted_Sp$Sp)]
+summary(is.na(TF_OGs_Sp)) #1320 -> 1234 YES + 86 NO
+TF_OGs_Pd <- dictionary_orthogroups_unlisted_Pd$OG[match(expanded_TFs_Pd,dictionary_orthogroups_unlisted_Pd$Pd)]
+summary(is.na(TF_OGs_Pd)) #1829 -> 1654 YES + 175 NO
+
+#summarise to same orthogroups
+TF_OGs_Ao <- unique(na.omit(TF_OGs_Ao)) #876
+TF_OGs_Bf <- unique(na.omit(TF_OGs_Bf)) #698
+TF_OGs_Pf <- unique(na.omit(TF_OGs_Pf)) #736
+TF_OGs_Sp <- unique(na.omit(TF_OGs_Sp)) #643
+TF_OGs_Pd <- unique(na.omit(TF_OGs_Pd)) #678
+
+#save(TF_OGs_Ao, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_OGs_Ao.rds") 
+#save(TF_OGs_Bf, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_OGs_Bf.rds") 
+#save(TF_OGs_Pf, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_OGs_Pf.rds") 
+#save(TF_OGs_Sp, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_OGs_Sp.rds") 
+#save(TF_OGs_Pd, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_OGs_Pd.rds") 
+
+
+# double check that these indeed total (and match) the original combined OG list
+length(unique(c(TF_OGs_Ao,TF_OGs_Bf,TF_OGs_Pf,TF_OGs_Sp,TF_OGs_Pd))) #1418
+summary(unique(c(TF_OGs_Ao,TF_OGs_Bf,TF_OGs_Pf,TF_OGs_Sp,TF_OGs_Pd)) %in% all_TF_orthogroups_withHox) #TRUE 1418
+```
+```{r}
+#we can further save the list of all TF proteins (expected (real) total sum 9264)
+all_TF_proteins <- c(expanded_TFs_Ao, expanded_TFs_Bf, expanded_TFs_Pf, expanded_TFs_Sp, expanded_TFs_Pd)
+#note that there appear to be proteins with the same code across species...
+summary(duplicated(all_TF_proteins)) #TRUE=12 (DUPLICATED) #FALSE=9252 (UNIQUE)
+
+#save(all_TF_proteins, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/all_TF_proteins.rds") #9264
+
+
+#the presence of duplicates means that we better use species-specific lists 
+#save(expanded_TFs_Ao, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_proteins_Ao.rds") #1926
+#save(expanded_TFs_Bf, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_proteins_Bf.rds") #2277
+#save(expanded_TFs_Pf, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_proteins_Pf.rds") #1912
+#save(expanded_TFs_Sp, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_proteins_Sp.rds") #1320
+#save(expanded_TFs_Pd, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_proteins_Pd.rds") #1829
+```
+
+```{r}
+#we can create the same list at the gene level
+
+#load all gene <-> protein dictionaries 
+dictionary_aoce <-  read.table(file = "Z://01_Stefano/Collaboration_Data/Annotations/Aoce_dictionary.csv", sep = ',', header = TRUE) #47242
+dictionary_bf <-  read.table(file = "Z://01_Stefano/Collaboration_Data/Annotations/Bf_dictionary.csv", sep = ',', header = TRUE) #26689
+dictionary_pf <-  read.table(file = "Z://01_Stefano/Collaboration_Data/Annotations/Pf_dictionary.csv", sep = ',', header = TRUE) #35854
+dictionary_sp <-  read.table(file = "Z://01_Stefano/Collaboration_Data/Annotations/Sp_dictionary.csv", sep = ',', header = TRUE) #27447
+dictionary_pd <-  read_excel("Z://01_Stefano/Collaboration_Data/Annotations/Pd_dictionary.xlsx") #166237
+
+#convert proteins to genes
+
+expanded_TFs_genes_Ao <- dictionary_aoce$geneID[match(expanded_TFs_Ao,dictionary_aoce$proteinID)] 
+summary(is.na(expanded_TFs_genes_Ao)) 
+length(unique(expanded_TFs_genes_Ao)) #1926 prots -> 1926 genes
+length(unique(na.omit(dictionary_aoce$proteinID[dictionary_aoce$geneID %in% expanded_TFs_genes_Ao== TRUE]))) #test for opposite conversion for later (gene to protein) #note that this finds 4268 proteins coded by those 1926 TF genes, but not all would be considered TF (isoforms with no TF domain?)
+summary(expanded_TFs_Ao %in% unique(na.omit(dictionary_aoce$proteinID[dictionary_aoce$geneID %in% expanded_TFs_genes_Ao== TRUE]))) #all TF proteins should be a subste of these protein isoforms
+
+expanded_TFs_genes_Bf <- dictionary_bf$gene_ID[match(expanded_TFs_Bf,dictionary_bf$protein_ID)] 
+summary(is.na(expanded_TFs_genes_Bf)) 
+length(unique(expanded_TFs_genes_Bf)) #2277 prots -> 2277 genes
+
+expanded_TFs_genes_Pf <- dictionary_pf$pf_gene_ID[match(expanded_TFs_Pf,dictionary_pf$pf_protein_ID)] 
+summary(is.na(expanded_TFs_genes_Pf)) 
+length(unique(expanded_TFs_genes_Pf)) #1912 prots -> 1912 genes
+
+expanded_TFs_genes_Sp <- dictionary_sp$ID.of.count.matrix[match(gsub("\\..*","",expanded_TFs_Sp),dictionary_sp$Protein)] 
+summary(is.na(expanded_TFs_genes_Sp)) 
+length(unique(expanded_TFs_genes_Sp)) #1317 unique #3 are proteins of the same gene
+expanded_TFs_genes_Sp <- unique(expanded_TFs_genes_Sp) #1320 prots -> 1317 genes
+
+expanded_TFs_genes_Pd <- dictionary_pd$gene_id[match(gsub("\\..*","",expanded_TFs_Pd),dictionary_pd$transcript_id)] 
+summary(is.na(expanded_TFs_genes_Pd)) 
+length(unique(expanded_TFs_genes_Pd)) #1829 prots -> 1829 genes
+
+#(expected (real) total sum 9261)
+all_TF_genes <- c(expanded_TFs_genes_Ao, expanded_TFs_genes_Bf, expanded_TFs_genes_Pf, expanded_TFs_genes_Sp, expanded_TFs_genes_Pd) 
+#note that there appear to be genes with the same code across species (Pf and Pd)...
+summary(duplicated(all_TF_genes)) #TRUE=45 (DUPLICATED) #FALSE=9216 (UNIQUE)
+
+#save(all_TF_genes, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/all_TF_genes.rds") #9261
+
+#the presence of duplicates means that we better use species-specific lists 
+#save(expanded_TFs_genes_Ao, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_genes_Ao.rds") #1926
+#save(expanded_TFs_genes_Bf, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_genes_Bf.rds") #2277
+#save(expanded_TFs_genes_Pf, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_genes_Pf.rds") #1912
+#save(expanded_TFs_genes_Sp, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_genes_Sp.rds") #1317
+#save(expanded_TFs_genes_Pd, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_genes_Pd.rds") #1829
+```
+
+
+
+### Load raw counts
+
+```{r}
+#DO NOT RUN (THIS IS TO DOCUMENT PREPARATION OF RAW COUNTS)
+#Raw count matrix for clownfish adult gut was generated by tximport in dedicated analysis notebook ("C:\Users\Doctor\Desktop\RNAseq_analyses\Aocellaris_gut_adult_ASM2253959v1\Rnotebook_bulkRNA_Aocellaris_gut_adult_ASM225395v1.Rmd")
+
+load("C://Users/Doctor/Desktop/RNAseq_analyses/Aocellaris_gut_adult_ASM2253959v1/Saved_objects/DGE_object.rds") #DGE_object
+counts_Ao <- as.data.frame(DGE_object$counts)
+#save(counts_Ao, file = "Z://01_Stefano/Collaboration_Data/raw_counts/counts_Ao.rds")
+rm(DGE_object)
+
+load("Z://01_Stefano/Collaboration_Data/DGE_object_genome_update_Pdum.rds")
+counts_Pd <- as.data.frame(DGE_object$counts)
+#save(counts_Pd, file = "Z://01_Stefano/Collaboration_Data/raw_counts/counts_Pd.rds")
+rm(DGE_object)
+
+#Raw count matrices from other species were provided by collaborator as part of larger collections. They were extracted and saved separatedly, as below
+
+#load(file = "Z://01_Stefano/Collaboration_Data/Amphioxus_DEseq_count_VST.RData")
+#for some reason, columns are not AP-ordered, so reorder for consistency with metadata
+#BfAdultGut_counts <- BfAdultGut_counts[, c(1,6,11,16,2,7,12,17,4,9,14,19,3,8,13,18,5,10,15,20)]
+#save(BfAdultGut_counts, file = "Z://01_Stefano/Collaboration_Data/raw_counts/counts_Bf.rds")
+
+#load(file = "Z://01_Stefano/Collaboration_Data/AcornWorm_DEseq_count_VST.RData")
+#PfAP_count_20231219 <- PfAP_count_20231219[,c(4,5,6,1,2,3, seq(7,ncol(PfAP_count_20231219)))]
+#save(PfAP_count_20231219, file = "Z://01_Stefano/Collaboration_Data/raw_counts/counts_Pf.rds")
+
+#load(file = "Z://01_Stefano/Collaboration_Data/SeaUrchin_DEseq_count_VST.RData")
+#save(SpAdultGut_Count, file = "Z://01_Stefano/Collaboration_Data/raw_counts/counts_Sp.rds")
+```
+
+
+
+```{r}
+#RUN DIRECTLY THIS
+## Load counts matrices
+load("Z://01_Stefano/Collaboration_Data/raw_counts/counts_Ao.rds")
+colnames(counts_Ao) <- paste0("Ao_", colnames(counts_Ao))
+load("Z://01_Stefano/Collaboration_Data/raw_counts/counts_Bf.rds")
+counts_Bf <- BfAdultGut_counts
+colnames(counts_Bf) <- paste0("Bf_", colnames(counts_Bf))
+rm(BfAdultGut_counts)
+load("Z://01_Stefano/Collaboration_Data/raw_counts/counts_Pf.rds")
+counts_Pf <- PfAP_count_20231219
+colnames(counts_Pf) <- paste0("Pf_", colnames(counts_Pf))
+rm(PfAP_count_20231219)
+load("Z://01_Stefano/Collaboration_Data/raw_counts/counts_Sp.rds")
+counts_Sp <- SpAdultGut_Count
+colnames(counts_Sp) <- paste0("Sp_", colnames(counts_Sp))
+rm(SpAdultGut_Count)
+load("Z://01_Stefano/Collaboration_Data/raw_counts/counts_Pd.rds")
+colnames(counts_Pd) <- paste0("Pd_", colnames(counts_Pd))
+```
+
+
+```{r}
+head(counts_Ao)
+head(counts_Bf)
+head(counts_Pf)
+head(counts_Sp)
+head(counts_Pd)
+```
+
+```{r}
+#check how many are transcription factors
+summary(expanded_TFs_genes_Ao %in% rownames(counts_Ao)) #1925, +1 TF not in counts data
+expanded_TFs_genes_Ao[!(expanded_TFs_genes_Ao %in% rownames(counts_Ao))]
+
+summary(expanded_TFs_genes_Bf %in% rownames(counts_Bf)) #2277
+expanded_TFs_genes_Bf[!(expanded_TFs_genes_Bf %in% rownames(counts_Bf))]
+
+summary(expanded_TFs_genes_Pf %in% rownames(counts_Pf)) #1912
+expanded_TFs_genes_Pf[!(expanded_TFs_genes_Pf %in% rownames(counts_Pf))]
+
+summary(expanded_TFs_genes_Sp %in% rownames(counts_Sp)) #1317
+expanded_TFs_genes_Sp[!(expanded_TFs_genes_Sp %in% rownames(counts_Sp))]
+
+summary(expanded_TFs_genes_Pd %in% rownames(counts_Pd)) #1829
+expanded_TFs_genes_Pd[!(expanded_TFs_genes_Pd %in% rownames(counts_Pd))]
+```
+
+### Load metadata tables
+```{r}
+#standardised metadata tables were prepared in separate notebook ("Z:\01_Stefano\Collaboration_Data\Annotations\Custom_functions.Rmd")
+#we will just load them here
+#note that for the clownfish one, the stadardise metadata was done without the liver, so we need to re-add the metadata for the liver samples
+
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Ao_samplemetadata_standard.rds")
+liver_metadata <- data.frame(segment = rep("liver", 3), replicate = c(1,2,3))
+rownames(liver_metadata) <- c("liv_01", "liv_02", "liv_03")
+sample_metadata_Ao <- rbind(liver_metadata, sample_metadata)
+rm(liver_metadata)
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Bf_samplemetadata_standard.rds")
+sample_metadata_Bf <- BfAdultGut_design2
+rm(BfAdultGut_design2)
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Pf_samplemetadata_standard.rds")
+sample_metadata_Pf <- PfAP_design2
+rm(PfAP_design2)
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Sp_samplemetadata_standard.rds")
+sample_metadata_Sp <- SpGut_design3
+rm(SpGut_design3)
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Pd_samplemetadata_standard.rds")
+sample_metadata_Pd <- sample_metadata
+sample_metadata_Pd$replicate <- rep(seq(1,3), 10)
+sample_metadata_Pd$replicate <- factor(sample_metadata_Pd$replicate, levels=seq(1,3))
+rm(sample_metadata)
+
+```
+
+
+```{r}
+# NOTE: no need to rerun this, load final object directly
+#We will also create a merge metadata sample
+sample_metadata_Ao$species <- "Ao"
+rownames(sample_metadata_Ao) <- paste0("Ao_", rownames(sample_metadata_Ao))
+sample_metadata_Bf$species <- "Bf"
+rownames(sample_metadata_Bf) <- paste0("Bf_", rownames(sample_metadata_Bf))
+sample_metadata_Pf$species <- "Pf"
+rownames(sample_metadata_Pf) <- paste0("Pf_", rownames(sample_metadata_Pf))
+sample_metadata_Sp$species <- "Sp"
+rownames(sample_metadata_Sp) <- paste0("Sp_", rownames(sample_metadata_Sp))
+sample_metadata_Pd$species <- "Pd"
+rownames(sample_metadata_Pd) <- paste0("Pd_", rownames(sample_metadata_Pd))
+
+merged_metadata <- do.call("rbind", list(sample_metadata_Ao, sample_metadata_Bf, sample_metadata_Pf, sample_metadata_Sp, sample_metadata_Pd))
+
+#the segments need to have a unique name to avoid problems downstream
+merged_metadata$segment <- paste(merged_metadata$species, merged_metadata$segment, sep="_")
+
+merged_metadata$segment <- factor(merged_metadata$segment, levels = unique(merged_metadata$segment))
+merged_metadata$species <- factor(merged_metadata$species, levels = unique(merged_metadata$species))
+
+head(merged_metadata)
+#save(merged_metadata, file = "Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/merged_metadata.rds")
+
+```
+
+```{r}
+#LOAD DIRECTLY THIS
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/merged_metadata.rds")
+```
+
+
+## Matrix preprocessing 
+
+
+
+```{r}
+#prefiltering step (using filter by Expr)
+#I was not originally doing this but otherwise there will always be problems later with all0 genes (no variance to plot z-scores in heatmap), or negative counts (after batch correction, for genes with a few low counts in a few samples and 0 everywhere else)
+
+#if we choose a fixed cpm threshold, do we affect different datasets differently? check distribution of cpm
+
+
+#filtering
+smallestGroupSize <- 3
+keep <- rowSums(round(counts_Ao) >= 10) >= smallestGroupSize
+counts_Ao <- counts_Ao[keep,]
+
+smallestGroupSize <- 4
+keep <- rowSums(round(counts_Bf) >= 10) >= smallestGroupSize
+counts_Bf <- counts_Bf[keep,]
+
+smallestGroupSize <- 3
+keep <- rowSums(round(counts_Pf) >= 10) >= smallestGroupSize
+counts_Pf <- counts_Pf[keep,]
+
+smallestGroupSize <- 4
+keep <- rowSums(round(counts_Sp) >= 10) >= smallestGroupSize
+counts_Sp <- counts_Sp[keep,]
+
+smallestGroupSize <- 3
+keep <- rowSums(round(counts_Pd) >= 10) >= smallestGroupSize
+counts_Pd <- counts_Pd[keep,]
+
+
+```
+
+
+```{r}
+#check effect on TFs
+
+##Ao
+summary(expanded_TFs_genes_Ao %in% rownames(counts_Ao)) #TRUE 1605
+summary(rownames(counts_Ao) %in% expanded_TFs_genes_Ao) #TRUE 1605 ##i.e. there are 1605 TFs expressed
+TF_genes_expressed_Ao <- rownames(counts_Ao)[(rownames(counts_Ao) %in% expanded_TFs_genes_Ao)==TRUE]
+summary(TF_genes_expressed_Ao %in% expanded_TFs_genes_Ao) #doublecheck #TRUE 1605 (all genes should be in the TF list)
+
+#obtain protein codes to find corresponding OGs. Note however that Ortohogroup table was run on longest protein isoform only. 
+dictionary_deduplicated_aoce <- read.table(file = "Y://bulkRNAseq/GCF_022539595.1/Aoce_dictionary_deduplicated.csv", sep = ',', header = TRUE)
+TF_proteins_expressed_Ao <- dictionary_deduplicated_aoce$proteinID[match(TF_genes_expressed_Ao, dictionary_deduplicated_aoce$geneID)]
+summary(is.na(TF_proteins_expressed_Ao))
+#double check
+summary(TF_proteins_expressed_Ao %in% expanded_TFs_Ao) #all should be present (true if selected longest isoform) #TRUE 1605
+
+#convert to OG
+TF_OGs_expressed_Ao <- dictionary_orthogroups_unlisted_Ao$OG[match(TF_proteins_expressed_Ao, dictionary_orthogroups_unlisted_Ao$Ao)]
+summary(is.na(TF_OGs_expressed_Ao)) #TRUE 55: do not have an orthogroup #FALSE 1550 have an orthogroup
+length(unique(na.omit(TF_OGs_expressed_Ao))) #TF that have an orthogrup are summarised as 781 orthogroups
+
+##Bf
+summary(expanded_TFs_genes_Bf %in% rownames(counts_Bf)) #1394
+summary(rownames(counts_Bf) %in% expanded_TFs_genes_Bf) #TRUE 1394 ##i.e. there are 1394 TFs expressed
+TF_genes_expressed_Bf <- rownames(counts_Bf)[(rownames(counts_Bf) %in% expanded_TFs_genes_Bf)==TRUE]
+summary(TF_genes_expressed_Bf %in% expanded_TFs_genes_Bf) #doublecheck #TRUE 1394 (all genes should be in the TF list)
+
+#obtain protein codes to find corresponding OGs. Note however that Ortohogroup table was run on longest protein isoform only. 
+dictionary_deduplicated_bf<- dictionary_bf
+TF_proteins_expressed_Bf <- dictionary_deduplicated_bf$protein_ID[match(TF_genes_expressed_Bf, dictionary_deduplicated_bf$gene_ID)]
+summary(is.na(TF_proteins_expressed_Bf))
+#double check
+summary(TF_proteins_expressed_Bf %in% expanded_TFs_Bf) #all should be present (true if selected longest isoform) #TRUE 1605
+
+#convert to OG
+TF_OGs_expressed_Bf <- dictionary_orthogroups_unlisted_Bf$OG[match(TF_proteins_expressed_Bf, dictionary_orthogroups_unlisted_Bf$Bf)]
+summary(is.na(TF_OGs_expressed_Bf)) #TRUE 98: do not have an orthogroup #FALSE 1296 have an orthogroup
+length(unique(na.omit(TF_OGs_expressed_Bf))) #TF that have an orthogrup are summarised as 613 orthogroups
+
+
+##Pf
+summary(expanded_TFs_genes_Pf %in% rownames(counts_Pf)) #1510
+summary(rownames(counts_Pf) %in% expanded_TFs_genes_Pf) #TRUE 1510 ##i.e. there are 1510 TFs expressed
+TF_genes_expressed_Pf <- rownames(counts_Pf)[(rownames(counts_Pf) %in% expanded_TFs_genes_Pf)==TRUE]
+summary(TF_genes_expressed_Pf %in% expanded_TFs_genes_Pf) #doublecheck #TRUE 1510 (all genes should be in the TF list)
+
+#obtain protein codes to find corresponding OGs. Note however that Ortohogroup table was run on longest protein isoform only. 
+dictionary_deduplicated_pf<- dictionary_pf
+TF_proteins_expressed_Pf <- dictionary_deduplicated_pf$pf_protein_ID[match(TF_genes_expressed_Pf, dictionary_deduplicated_pf$pf_gene_ID)]
+summary(is.na(TF_proteins_expressed_Pf))
+#double check
+summary(TF_proteins_expressed_Pf %in% expanded_TFs_Pf) #all should be present (true if selected longest isoform) #TRUE 1510
+
+#convert to OG
+TF_OGs_expressed_Pf <- dictionary_orthogroups_unlisted_Pf$OG[match(TF_proteins_expressed_Pf, dictionary_orthogroups_unlisted_Pf$Pf)]
+summary(is.na(TF_OGs_expressed_Pf)) #TRUE 91: do not have an orthogroup #FALSE 1419 have an orthogroup
+length(unique(na.omit(TF_OGs_expressed_Pf))) #TF that have an orthogrup are summarised as 710 orthogroups
+
+
+##Sp
+summary(expanded_TFs_genes_Sp %in% rownames(counts_Sp)) #1011
+summary(rownames(counts_Sp) %in% expanded_TFs_genes_Sp) #TRUE 1011 ##i.e. there are 1011 TFs expressed
+TF_genes_expressed_Sp <- rownames(counts_Sp)[(rownames(counts_Sp) %in% expanded_TFs_genes_Sp)==TRUE]
+summary(TF_genes_expressed_Sp %in% expanded_TFs_genes_Sp) #doublecheck #TRUE 1011 (all genes should be in the TF list)
+
+#obtain protein codes to find corresponding OGs. Note however that Ortohogroup table was run on longest protein isoform only. 
+#dictionary_sp is not deduplicated for all (20) genes!! # = summary(duplicated(dictionary_sp$ID.of.count.matrix)) has TRUE entries
+dictionary_deduplicated_sp<- dictionary_sp
+TF_proteins_expressed_Sp <- dictionary_deduplicated_sp$Protein[match(TF_genes_expressed_Sp, dictionary_deduplicated_sp$ID.of.count.matrix)]
+summary(is.na(TF_proteins_expressed_Sp))
+#double check
+summary(TF_proteins_expressed_Sp %in% gsub("\\..*","",expanded_TFs_Sp)) #all should be present (true if selected longest isoform) #TRUE 1011
+
+#convert to OG
+TF_OGs_expressed_Sp <- dictionary_orthogroups_unlisted_Sp$OG[match(TF_proteins_expressed_Sp, gsub("\\..*","",dictionary_orthogroups_unlisted_Sp$Sp))]
+summary(is.na(TF_OGs_expressed_Sp)) #TRUE 70: do not have an orthogroup #FALSE 941 have an orthogroup
+length(unique(na.omit(TF_OGs_expressed_Sp))) #TF that have an orthogrup are summarised as 564 orthogroups
+
+
+
+##Pd 
+summary(expanded_TFs_genes_Pd %in% rownames(counts_Pd)) #1503
+summary(rownames(counts_Pd) %in% expanded_TFs_genes_Pd) #TRUE 1503 ##i.e. there are 1503 TFs expressed
+TF_genes_expressed_Pd <- rownames(counts_Pd)[(rownames(counts_Pd) %in% expanded_TFs_genes_Pd)==TRUE]
+summary(TF_genes_expressed_Pd %in% expanded_TFs_genes_Pd) #doublecheck #TRUE 1503 (all genes should be in the TF list)
+
+#obtain protein codes to find corresponding OGs. Note however that Ortohogroup table was run on longest protein isoform only. 
+dictionary_deduplicated_pd<- read.table(file = "Z://01_Stefano/Collaboration_Data/Annotations/Pdum_dictionary_deduplicated_v2.csv", sep = ',', header = TRUE)
+TF_proteins_expressed_Pd <- dictionary_deduplicated_pd$transcript_id[match(TF_genes_expressed_Pd, dictionary_deduplicated_pd$gene_id)]
+summary(is.na(TF_proteins_expressed_Pd)) 
+#double check
+summary(TF_proteins_expressed_Pd %in% gsub("\\..*","",expanded_TFs_Pd)) #all should be present (true if selected longest isoform) #TRUE 1503 (for now only 1346... )
+
+#convert to OG
+TF_OGs_expressed_Pd <- dictionary_orthogroups_unlisted_Pd$OG[match(TF_proteins_expressed_Pd, gsub("\\..*","",dictionary_orthogroups_unlisted_Pd$Pd))]
+summary(is.na(TF_OGs_expressed_Pd)) #TRUE 157: do not have an orthogroup #FALSE 1346 have an orthogroup (this suggests that the original list only included proteins with an orthogroup?)
+length(unique(na.omit(TF_OGs_expressed_Pd))) #TF that have an orthogrup are summarised as XXX orthogroups
+
+
+
+```
+
+```{r}
+#we can do the same quantifications but for all genes, not just TF genes
+
+##Ao
+#obtain protein codes to find corresponding OGs. Note however that Ortohogroup table was run on longest protein isoform only. 
+dictionary_deduplicated_aoce <- read.table(file = "Y://bulkRNAseq/GCF_022539595.1/Aoce_dictionary_deduplicated.csv", sep = ',', header = TRUE)
+proteins_expressed_Ao <- dictionary_deduplicated_aoce$proteinID[match(rownames(counts_Ao), dictionary_deduplicated_aoce$geneID)]
+summary(is.na(proteins_expressed_Ao)) #TRUE 1970 genes that do not have a protein #FALSE 19574 (with protein)
+
+#convert to OG
+OGs_expressed_Ao <- dictionary_orthogroups_unlisted_Ao$OG[match(na.omit(proteins_expressed_Ao), dictionary_orthogroups_unlisted_Ao$Ao)]
+summary(is.na(OGs_expressed_Ao)) #TRUE 5173: do not have an orthogroup #FALSE 14401 have an orthogroup
+length(unique(na.omit(OGs_expressed_Ao))) #TF that have an orthogrup are summarised as 9491 orthogroups
+
+
+##Bf
+#obtain protein codes to find corresponding OGs. Note however that Ortohogroup table was run on longest protein isoform only. 
+dictionary_deduplicated_bf <- dictionary_bf
+proteins_expressed_Bf <- dictionary_deduplicated_bf$protein_ID[match(rownames(counts_Bf), dictionary_deduplicated_bf$gene_ID)]
+summary(is.na(proteins_expressed_Bf)) #TRUE 1095 genes that do not have a protein #FALSE 19557 (with protein)
+
+#convert to OG
+OGs_expressed_Bf <- dictionary_orthogroups_unlisted_Bf$OG[match(na.omit(proteins_expressed_Bf), dictionary_orthogroups_unlisted_Bf$Bf)]
+summary(is.na(OGs_expressed_Bf)) #TRUE 1764: do not have an orthogroup #FALSE 17793 have an orthogroup
+length(unique(na.omit(OGs_expressed_Bf))) #TF that have an orthogrup are summarised as 10832 orthogroups
+
+##Pf
+#obtain protein codes to find corresponding OGs. Note however that Ortohogroup table was run on longest protein isoform only. 
+dictionary_deduplicated_pf <- dictionary_pf
+proteins_expressed_Pf <- dictionary_deduplicated_pf$pf_protein_ID[match(rownames(counts_Pf), dictionary_deduplicated_pf$pf_gene_ID)]
+summary(is.na(proteins_expressed_Pf)) #TRUE 31 genes that do not have a protein #FALSE 28539 (with protein)
+
+#convert to OG
+OGs_expressed_Pf <- dictionary_orthogroups_unlisted_Pf$OG[match(na.omit(proteins_expressed_Pf), dictionary_orthogroups_unlisted_Pf$Pf)]
+summary(is.na(OGs_expressed_Pf)) #TRUE 2654: do not have an orthogroup #FALSE 25885 have an orthogroup
+length(unique(na.omit(OGs_expressed_Pf))) #TF that have an orthogrup are summarised as 9491 orthogroups
+
+
+
+##Sp
+#obtain protein codes to find corresponding OGs. Note however that Ortohogroup table was run on longest protein isoform only. 
+#dictionary_sp is not deduplicated for all (20) genes!! # = summary(duplicated(dictionary_sp$ID.of.count.matrix)) has TRUE entries
+dictionary_deduplicated_sp<- dictionary_sp
+proteins_expressed_Sp <- dictionary_deduplicated_sp$Protein[match(rownames(counts_Sp), dictionary_deduplicated_sp$ID.of.count.matrix)]
+summary(is.na(proteins_expressed_Sp)) #TRUE 1653 genes that do not have a protein #FALSE 20617 (with protein)
+
+#convert to OG
+OGs_expressed_Sp <- dictionary_orthogroups_unlisted_Sp$OG[match(na.omit(proteins_expressed_Sp), gsub("\\..*","",dictionary_orthogroups_unlisted_Sp$Sp))]
+summary(is.na(OGs_expressed_Sp)) #TRUE 1388: do not have an orthogroup #FALSE 19229 have an orthogroup
+length(unique(na.omit(OGs_expressed_Sp))) #TF that have an orthogrup are summarised as 10620 orthogroups
+
+
+##Pd
+#obtain protein codes to find corresponding OGs. Note however that Ortohogroup table was run on longest protein isoform only. 
+#dictionary_sp is not deduplicated for all (20) genes!! # = summary(duplicated(dictionary_sp$ID.of.count.matrix)) has TRUE entries
+dictionary_deduplicated_pd<- read.table(file = "Z://01_Stefano/Collaboration_Data/Annotations/Pdum_dictionary_deduplicated_v2.csv", sep = ',', header = TRUE)
+proteins_expressed_Pd <- dictionary_deduplicated_pd$transcript_id[match(rownames(counts_Pd), dictionary_deduplicated_pd$gene_id)]
+summary(is.na(proteins_expressed_Pd)) #TRUE 14151 genes that do not have a protein #FALSE 23241 (with protein)
+
+#convert to OG
+OGs_expressed_Pd <- dictionary_orthogroups_unlisted_Pd$OG[match(na.omit(proteins_expressed_Pd), gsub("\\..*","",dictionary_orthogroups_unlisted_Pd$Pd))]
+summary(is.na(OGs_expressed_Pd)) #TRUE 4122: do not have an orthogroup #FALSE 19119 have an orthogroup
+length(unique(na.omit(OGs_expressed_Pd))) #TF that have an orthogrup are summarised as 10620 orthogroups
+
+```
+
+```{r}
+## Quantify TF OGs in post-subsetted OG tables (alternative method, as expected from pre-subsetted tables)
+
+load("Z://01_Stefano/Collaboration_Data/Annotations/Best_orthologue_all_orthogroups/dictionary_orthogroups_best_all_withHox_genebased.rds")
+summary(expanded_TFs_genes_Ao[(expanded_TFs_genes_Ao %in% rownames(counts_Ao))] %in% na.omit(dictionary_orthogroups_best_withHox_genebased$Ao)) #1605 -> 720 orthogroups TF OGs
+expanded_TFs_genes_Ao[(expanded_TFs_genes_Ao[(expanded_TFs_genes_Ao %in% rownames(counts_Ao))] %in% na.omit(dictionary_orthogroups_best_withHox_genebased$Ao)) == TRUE]
+
+
+summary(rownames(counts_Ao) %in% na.omit(dictionary_orthogroups_best_withHox_genebased$Ao)) #21544 genes -> 10742  OGs
+
+
+summary(expanded_TFs_genes_Bf %in% rownames(counts_Bf)) #1394
+summary(expanded_TFs_genes_Bf[(expanded_TFs_genes_Bf %in% rownames(counts_Bf))] %in% na.omit(dictionary_orthogroups_best_withHox_genebased$Bf)) #1394 -> 541 TF OGs
+summary(rownames(counts_Bf) %in% na.omit(dictionary_orthogroups_best_withHox_genebased$Bf)) #20652 genes -> 9719 OGs
+
+summary(expanded_TFs_genes_Pf %in% rownames(counts_Pf)) #1510
+summary(expanded_TFs_genes_Pf[(expanded_TFs_genes_Pf %in% rownames(counts_Pf))] %in% na.omit(dictionary_orthogroups_best_withHox_genebased$Pf)) #1510 -> 613 TF OGs
+summary(rownames(counts_Pf) %in% na.omit(dictionary_orthogroups_best_withHox_genebased$Pf)) #28570 genes -> 10302  OGs
+
+summary(expanded_TFs_genes_Sp %in% rownames(counts_Sp)) #1011
+summary(expanded_TFs_genes_Sp[(expanded_TFs_genes_Sp %in% rownames(counts_Sp))] %in% na.omit(dictionary_orthogroups_best_withHox_genebased$Sp)) #1011 -> 496 TF OGs
+summary(rownames(counts_Sp) %in% na.omit(dictionary_orthogroups_best_withHox_genebased$Sp)) #22270 genes -> 9194  OGs
+
+summary(expanded_TFs_genes_Pd %in% rownames(counts_Pd)) #1503
+summary(expanded_TFs_genes_Pd[(expanded_TFs_genes_Pd %in% rownames(counts_Pd))] %in% na.omit(dictionary_orthogroups_best_withHox_genebased$Pd)) #1503 -> 506 TF OGs
+summary(rownames(counts_Pd) %in% na.omit(dictionary_orthogroups_best_withHox_genebased$Pd)) #37392 -> 8388  OGs
+```
+
+
+
+```{r}
+#Each counts matrix will undergo an initial standard preprocessing through the Deseq2 pipeline, but without followup VST (as in the reference paper)
+
+
+## create a DeSeq2 object. We can use the original count data (unfiltered, un-normalised) because this is done automatically by the function (???). 
+DeSeq2_Ao <- DESeqDataSetFromMatrix(countData=round(counts_Ao),
+                                    colData=sample_metadata_Ao,
+                                    design=~segment)
+# calculate the size factors of each sample (these are stored in DeSeq2_Ao@colData@listData[["sizeFactor"]])
+DeSeq2_Ao <- DESeq2::estimateSizeFactors(DeSeq2_Ao,type="ratio") #size factors in DeSeq2 are not relative to one sample 
+# apply the normalisation to your counts
+counts_DeSeq2_Ao <- counts(DeSeq2_Ao,normalized=TRUE) #the normalisation performed here includes the correction for library size that we were doing with CPM transform, as well as the proper "normalisation" against compositional bias based on Median of Rations methods
+
+DeSeq2_Bf <- DESeqDataSetFromMatrix(countData=round(counts_Bf),
+                                    colData=sample_metadata_Bf,
+                                    design=~segment)
+DeSeq2_Bf <- DESeq2::estimateSizeFactors(DeSeq2_Bf,type="ratio")
+counts_DeSeq2_Bf <- counts(DeSeq2_Bf,normalized=TRUE)
+
+
+
+DeSeq2_Pf <- DESeqDataSetFromMatrix(countData=round(counts_Pf),
+                                    colData=sample_metadata_Pf,
+                                    design=~segment)
+DeSeq2_Pf <- DESeq2::estimateSizeFactors(DeSeq2_Pf,type="ratio")
+counts_DeSeq2_Pf <- counts(DeSeq2_Pf,normalized=TRUE)
+
+
+
+DeSeq2_Sp <- DESeqDataSetFromMatrix(countData=round(counts_Sp),
+                                    colData=sample_metadata_Sp,
+                                    design=~segment)
+DeSeq2_Sp <- DESeq2::estimateSizeFactors(DeSeq2_Sp,type="ratio")
+counts_DeSeq2_Sp <- counts(DeSeq2_Sp,normalized=TRUE)
+
+
+
+
+DeSeq2_Pd <- DESeqDataSetFromMatrix(countData=round(counts_Pd),
+                                    colData=sample_metadata_Pd,
+                                    design=~segment)
+DeSeq2_Pd <- DESeq2::estimateSizeFactors(DeSeq2_Pd,type="ratio")
+counts_DeSeq2_Pd <- counts(DeSeq2_Pd,normalized=TRUE)
+
+```
+
+
+```{r}
+#VST transform (within dataset) 
+#note that this is not in ref publication, but did not seem to affect restults
+DeSeq2_Ao <- DESeq2::estimateDispersions(DeSeq2_Ao)
+# apply the transformation to your counts
+VST_Ao <- as.data.frame(assay(varianceStabilizingTransformation(DeSeq2_Ao,blind=T)),check.names=F)
+
+DeSeq2_Bf <- DESeq2::estimateDispersions(DeSeq2_Bf)
+VST_Bf <- as.data.frame(assay(varianceStabilizingTransformation(DeSeq2_Bf,blind=T)),check.names=F)
+
+DeSeq2_Pf <- DESeq2::estimateDispersions(DeSeq2_Pf)
+VST_Pf <- as.data.frame(assay(varianceStabilizingTransformation(DeSeq2_Pf,blind=T)),check.names=F)
+
+DeSeq2_Sp <- DESeq2::estimateDispersions(DeSeq2_Sp)
+VST_Sp <- as.data.frame(assay(varianceStabilizingTransformation(DeSeq2_Sp,blind=T)),check.names=F)
+
+DeSeq2_Pd <- DESeq2::estimateDispersions(DeSeq2_Pd)
+VST_Pd <- as.data.frame(assay(varianceStabilizingTransformation(DeSeq2_Pd,blind=T)),check.names=F)
+```
+
+```{r}
+#correct for batch effect (within each dataset)
+
+#define the normal model matrix (the one you will use in differential analysis) except without batch effect
+model_matrix<- model.matrix( ~-1+ segment, 
+                             data= sample_metadata_Ao # normally would extract from inside object e.g. DGE_object_filterednormed$samples
+                             )
+
+VST_Ao_corrected <- removeBatchEffect(VST_Ao, 
+                               batch = sample_metadata_Ao$replicate, #factor or vector indicating batches
+                               design=model_matrix  #design matrix relating to treatment conditions to be preserved, usually the design matrix with all experimental factors other than the batch effects.
+                                          )
+
+
+model_matrix<- model.matrix( ~-1+ segment, data= sample_metadata_Bf)
+VST_Bf_corrected <- removeBatchEffect(VST_Bf, 
+                                     batch = sample_metadata_Bf$replicate,
+                                     design=model_matrix)
+
+model_matrix<- model.matrix( ~-1+ segment, data= sample_metadata_Pf)
+VST_Pf_corrected <- removeBatchEffect(VST_Pf, 
+                                     batch = sample_metadata_Pf$replicate,
+                                     design=model_matrix)
+
+model_matrix<- model.matrix( ~-1+ segment, data= sample_metadata_Sp)
+VST_Sp_corrected <- removeBatchEffect(VST_Sp, 
+                                     batch = sample_metadata_Sp$replicate,
+                                     design=model_matrix)
+
+model_matrix<- model.matrix( ~-1+ segment, data= sample_metadata_Pd)
+VST_Pd_corrected <- removeBatchEffect(VST_Pd, 
+                                     batch = sample_metadata_Pd$replicate,
+                                     design=model_matrix)
+```
+
+```{r}
+#save objects for future loading
+#save(VST_Ao_corrected, file="Z://01_Stefano/Collaboration_Data/VST_Ao_corrected.rds")
+#save(VST_Bf_corrected, file="Z://01_Stefano/Collaboration_Data/VST_Bf_corrected.rds")
+#save(VST_Pf_corrected, file="Z://01_Stefano/Collaboration_Data/VST_Pf_corrected.rds")
+#save(VST_Sp_corrected, file="Z://01_Stefano/Collaboration_Data/VST_Sp_corrected.rds")
+#save(VST_Pd_corrected, file="Z://01_Stefano/Collaboration_Data/VST_Pd_corrected.rds")
+```
+
+
+```{r}
+#NO NEED TO RUN
+#finally, convert all to log2+1
+#note this is already the output of the vst object since it is built on the Deseq2 object (which stores the log), so no need to run
+log2counts_DeSeq2_Ao <- log2(counts_DeSeq2_Ao+1)
+log2counts_DeSeq2_Bf <- log2(counts_DeSeq2_Bf+1)
+log2counts_DeSeq2_Pf <- log2(counts_DeSeq2_Pf+1)
+log2counts_DeSeq2_Sp <- log2(counts_DeSeq2_Sp+1)
+log2counts_DeSeq2_Pd <- log2(counts_DeSeq2_Pd+1)
+```
+
+```{r}
+#save objects for future loading
+#save(log2counts_DeSeq2_Ao, file="Z://01_Stefano/Collaboration_Data/log2counts_DeSeq2_Ao.rds")
+#save(log2counts_DeSeq2_Bf, file="Z://01_Stefano/Collaboration_Data/log2counts_DeSeq2_Bf.rds")
+#save(log2counts_DeSeq2_Pf, file="Z://01_Stefano/Collaboration_Data/log2counts_DeSeq2_Pf.rds")
+#save(log2counts_DeSeq2_Sp, file="Z://01_Stefano/Collaboration_Data/log2counts_DeSeq2_Sp.rds")
+#save(log2counts_DeSeq2_Pd, file="Z://01_Stefano/Collaboration_Data/log2counts_DeSeq2_Pd.rds")
+```
+
+
+
+
+
+
+
+Orthofinder will be run using a dedpulicated proteome that, for each gene, only consider the protein encoded by the best representative isoform (here: the longest isoform). This deduplicated dictionary was created in the notebook "C://Users/Doctor/Desktop/Rscripts/Proteome_dictionary.Rmd" and is reported here for reference
+
+## Deduplicated proteome for Orthofinder (NO NEED TO RERUN)
+
+```{r}
+
+#Load the A_ocellaris genomic gtf file downloaded from NCBI
+gtf <- rtracklayer::import("Y://bulkRNAseq/GCF_022539595.1/GCF_022539595.1_ASM2253959v1_genomic.gtf")
+gtf_df=as.data.frame(gtf)
+
+#to avoid having to reload every time (in case of mistakes), create a working copy
+gtf_df_subset <- gtf_df
+
+#make all empty cells "NA"
+gtf_df_subset[gtf_df_subset == ''] <- NA
+#remove entries that have neither protein nor transcript
+gtf_df_subset <- gtf_df_subset[!(is.na(gtf_df_subset$protein_id)==TRUE & is.na(gtf_df_subset$transcript_id)==TRUE),]
+#remove entries with no prot id
+gtf_df_subset <- gtf_df_subset[is.na(gtf_df_subset$protein_id)==FALSE,]
+
+
+#Only keep columns of interest
+gtf_df_subset <- gtf_df_subset[, c("db_xref", "transcript_id", "protein_id")]
+# Gene_IDs (in column db_xref) have text in front of them. Remove that and only keep number
+gtf_df_subset$db_xref <- gsub(".*:","",gtf_df_subset$db_xref)
+
+#Remove any duplicated entry (the original gtf file had many repetitions due to differences in other columns we removed)
+gtf_df_subset <- gtf_df_subset[!duplicated(gtf_df_subset), ]
+
+#give nicer names
+names(gtf_df_subset) <- c("geneID", "transcriptID", "proteinID")
+
+```
+
+```{r}
+#to deduplicate (i.e. only keep one mRNA isoform/protein per gene), we will keep the longest isoform
+
+#collect exon information
+gtf_df_exons <- gtf_df[gtf_df$type == "exon",c("transcript_id", "type", "width")]
+
+#create a list of summed exons for each transcript
+lengths <- as.data.frame(aggregate(gtf_df_exons$width, by=list(transcript_id=gtf_df_exons$transcript_id), FUN=sum))
+#reorder based on same order as our dictionary
+lengths <- lengths[order(match(lengths$transcript_id, gtf_df_subset$transcriptID)),]
+
+#add the lengths to each transcript id
+gtf_df_subset$transcript_length <- lengths[match(gtf_df_subset$transcriptID, lengths$transcript_id ),"x"] 
+
+#save complete dictionary
+#write.csv(gtf_df_subset, "Y://bulkRNAseq/GCF_022539595.1/Aoce_dictionary.csv",  row.names=FALSE)
+```
+
+```{r}
+#Create a deduplicated dictionary
+
+#only keep first entry for proteins from the same gene
+#gtf_df_deduplicated <- gtf_df_subset[!duplicated(gtf_df_subset$geneID),]
+
+##Deduplicate by only keeping longest transcript isoform for each gene
+#order by increasing length (first entry of each is the shortes)
+gtf_df_deduplicated <- gtf_df_subset[order(gtf_df_subset$transcript_length, abs(gtf_df_subset$transcript_length), decreasing = T ), ]
+
+rownames(gtf_df_deduplicated) <- seq(1:nrow(gtf_df_deduplicated))
+#remove first entry of any duplicated geneID
+gtf_df_deduplicated <- gtf_df_deduplicated[!duplicated(gtf_df_deduplicated$geneID), ]
+#reorder base on dictionary
+gtf_df_deduplicated <- gtf_df_deduplicated[order(match(gtf_df_deduplicated$geneID, gtf_df_subset$geneID)),]
+
+#save deduplicated dictionary
+#write.csv(gtf_df_deduplicated, "Y://bulkRNAseq/GCF_022539595.1/Aoce_dictionary_deduplicated.csv",  row.names=FALSE)
+
+```
+
+```{r}
+#only keep deduplicated proteins in original proteome
+#proteome downloaded at
+#https://www.ncbi.nlm.nih.gov/protein/?term=txid7955
+
+#need to write a txt file of the proteins to keep, one per line
+write.table(gtf_df_deduplicated$proteinID, "Y://bulkRNAseq/deduplicated_protein_codes.txt", sep="\n",row.names=FALSE, col.names = FALSE, quote = F)
+
+#run in wsl terminal
+#/home/svianello22/bbmap/filterbyname.sh -Xmx2g in=/mnt/y/bulkRNAseq/GCF_022539595.1/proteome/A_ocellaris.fasta out=/mnt/y/bulkRNAseq/A_ocellaris_deduplicated.fasta names=/mnt/y/bulkRNAseq/deduplicated_protein_codes.txt include=t substring=name ow=t ignorejunk=t
+
+```
+
+File: "Y:\bulkRNAseq\deduplicated_protein_codes.txt"
+Deduplicated proteomes were equivalently generated by other team members for all other species, all were sent for Orthofinder orthogroup identification
+
+
+## Splitting (NO NEED TO RERUN)
+
+```{r}
+#each of the proteome files, were split in one file per entry, each called with the protein code
+#"Z://01_Stefano/Collaboration_Data/Annotations/Proteomes/Split/"
+#run in wsl terminal:
+
+#for aoce
+#/home/svianello22/bbmap/demuxbyname.sh in=A_ocellaris_deduplicated_test.fasta out=%.fasta prefixmode length=14 ignorejunk=t
+
+#for Drer
+#/home/svianello22/bbmap/demuxbyname.sh in=/mnt/z/01_Stefano/Collaboration_Data/Annotations/Proteomes/Danio_rerio_deduplicated.fasta out=%.fasta prefixmode ignorejunk=t delimiter=space
+
+#for Hs
+#/home/svianello22/bbmap/demuxbyname.sh in=/mnt/z/01_Stefano/Collaboration_Data/Annotations/Proteomes/Homo_sapiens_deduplicated.fasta out=%.fasta prefixmode ignorejunk=t delimiter=space
+
+#for Mmus
+#/home/svianello22/bbmap/demuxbyname.sh in=/mnt/z/01_Stefano/Collaboration_Data/Annotations/Proteomes/Mus_musculus_deduplicated.fasta out=%.fasta prefixmode ignorejunk=t delimiter=space
+
+#for Bf
+#/home/svianello22/bbmap/demuxbyname.sh in=/mnt/z/01_Stefano/Collaboration_Data/Annotations/Proteomes/Bf_deduplicated.fasta out=%.fasta prefixmode ignorejunk=t delimiter=space
+
+#for Pf
+#/home/svianello22/bbmap/demuxbyname.sh in=/mnt/z/01_Stefano/Collaboration_Data/Annotations/Proteomes/Pf_deduplicated.fasta out=%.fasta prefixmode length=17 ignorejunk=t
+
+#for Sp (#note that this method may not be adapting to variable names)
+#/home/svianello22/bbmap/demuxbyname.sh in=/mnt/z/01_Stefano/Collaboration_Data/Annotations/Proteomes/Sp_deduplicated.fasta out=%.fasta prefixmode length=14 ignorejunk=t
+
+#for Pd (#note that this method may not be adapting to variable names)
+#/home/svianello22/bbmap/demuxbyname.sh in=/mnt/z/01_Stefano/Collaboration_Data/Annotations/Proteomes/Pd_deduplicated.fasta out=%.fasta prefixmode length=17 ignorejunk=t
+
+#otherwise there is also the option to only split out only the proteins in the final orthogroup table
+#https://www.biostars.org/p/227823/ 
+```
+
+
+
+### Filtering of orthogroups
+
+```{r}
+#size filtering
+#load the file with the number of genes in each orthogroup
+dictionary_orthogroups <- read.table(file = "Z://01_Stefano/Collaboration_Data/Annotations/Results_Nov01/Orthogroups/Orthogroups.GeneCount.tsv", sep = '\t', header = TRUE)
+rownames(dictionary_orthogroups) <- dictionary_orthogroups$Orthogroup
+dictionary_orthogroups <- dictionary_orthogroups[,2:ncol(dictionary_orthogroups)]
+
+#remove orthogroups that are present in only one species (i.e. are not shared across species)
+
+tmp <- dictionary_orthogroups[,1:8] == 0
+boolean <- unname(rowSums(tmp) == 7)
+
+dictionary_orthogroups <- dictionary_orthogroups[boolean == F,]
+
+#get an idea of the distribution of sizes
+hist(dictionary_orthogroups$Total, breaks = max(dictionary_orthogroups$Total))
+abline(v=max(dictionary_orthogroups$Total), col = "dodgerblue")
+abline(v=median(dictionary_orthogroups$Total), col = "dodgerblue")
+abline(v=120, col = "red")
+abline(v=80, col = "orange")
+
+paste("The biggest orthogroup has", max(dictionary_orthogroups$Total), " genes across all species")
+paste("The smallest orthogroup has", min(dictionary_orthogroups$Total), " genes across all species")
+paste("The average orthogroup has", mean(dictionary_orthogroups$Total), " genes across all species")
+paste("The median orthogroup has", median(dictionary_orthogroups$Total), " genes across all species")
+```
+
+```{r}
+#the filtering thresholds could be chosen based on the distribution and the purposes of the analysis. For now, we will use the same thresholds as the publication Mantica, Federica, Luis P. Iñiguez, Yamile Marquez, Jon Permanyer, Antonio Torres-Mendez, Josefa Cruz, Xavier Franch-Marro et al. "Evolution of tissue-specific expression of ancestral genes across vertebrates and insects." Nature Ecology & Evolution (2024): 1-14.
+
+
+#remove all orthogroups with more than 120 genes (red line)
+dictionary_orthogroups <- dictionary_orthogroups[dictionary_orthogroups$Total <120,]
+
+tmp <- dictionary_orthogroups[,1:8] > (0.2*dictionary_orthogroups$Total)
+boolean <- unname(rowSums(tmp) != 0)
+
+
+#remove orthogroups with more than 80 genes, if these orthogroup do not have balanced species representation
+
+dictionary_orthogroups <- dictionary_orthogroups[!(rownames(dictionary_orthogroups) %in% (rownames(dictionary_orthogroups[(dictionary_orthogroups$Total >80 & boolean == T ),]))),]
+
+#note that all bigger orthogroups were "unbalanced"
+
+
+#get an idea of the distribution of sizes
+hist(dictionary_orthogroups$Total, breaks = max(dictionary_orthogroups$Total))
+abline(v=max(dictionary_orthogroups$Total), col = "dodgerblue")
+abline(v=median(dictionary_orthogroups$Total), col = "dodgerblue")
+
+
+paste("The biggest orthogroup has", max(dictionary_orthogroups$Total), " genes across all species")
+paste("The smallest orthogroup has", min(dictionary_orthogroups$Total), " genes across all species")
+paste("The average orthogroup has", mean(dictionary_orthogroups$Total), " genes across all species")
+paste("The median orthogroup has", median(dictionary_orthogroups$Total), " genes across all species")
+```
+
+```{r}
+#we can save this list of filtered orthogroups (just based on size criteria) #17022
+prefiltered_orthogroups_list <- rownames(dictionary_orthogroups)
+#save(prefiltered_orthogroups_list, file = "Z://01_Stefano/Collaboration_Data/prefiltered_orthogroups_list.rds")
+```
+
+
+## Bilaterian-conserved orthogroups  (and TF OG subsetting)
+
+
+
+
+
+```{r}
+##orthogroups that all species have genes in (can be used for dataset comparison)
+#mark as TRUE, if species does not have any genes
+tmp <- dictionary_orthogroups[,1:8] == 0
+#mark as TRUE, if orhtogroups has at leas one species TRUE above
+boolean <- unname(rowSums(tmp) != 0)
+
+represented_orthogroups <- dictionary_orthogroups[boolean == F,]
+#note: we ended up with 6118 orthogroups
+represented_orthogroups_list <- rownames(represented_orthogroups)
+#save(represented_orthogroups_list, file = "Z://01_Stefano/Collaboration_Data/represented_orthogroups_list.rds")
+
+##bilaterian conserved orthogroups
+#mark as TRUE, if species does not have any genes
+tmp <- dictionary_orthogroups[,1:8] == 0
+#mark as TRUE, if orhtogroups has more than 4  species TRUE above
+boolean <- unname(rowSums(tmp) >= 4)
+
+bilaterian_orthogroups <- dictionary_orthogroups[boolean == F,]
+#note: we ended up with 8930 orthogroups
+bilaterian_orthogroups_list <- rownames(bilaterian_orthogroups)
+#save(bilaterian_orthogroups_list, file = "Z://01_Stefano/Collaboration_Data/bilaterian_orthogroups_list.rds")
+```
+
+```{r}
+#only keep the ones that are represented in all 5 of our species specifically
+tmp <- dictionary_orthogroups[,c(1,2,6,7,8)] == 0
+#mark as TRUE, if orhtogroups has at leas one species TRUE above
+boolean <- unname(rowSums(tmp) != 0)
+
+represented_orthogroups_studyspecies <- dictionary_orthogroups[boolean == F,]
+#note: we ended up with 6517 orthogroups
+represented_orthogroups_studyspecies_list <- rownames(represented_orthogroups_studyspecies)
+#save(represented_orthogroups_studyspecies, file = "Z://01_Stefano/Collaboration_Data/represented_orthogroups_studyspecies_list.rds")
+```
+
+```{r}
+load("Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_OGs_Ao.rds") 
+load("Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_OGs_Bf.rds") 
+load("Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_OGs_Pf.rds") 
+load("Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_OGs_Sp.rds") 
+load("Z://01_Stefano/Collaboration_Data/Annotations/TFs/TF_OGs_Pd.rds") 
+
+load("Z://01_Stefano/Collaboration_Data/represented_orthogroups_list.rds") 
+load("Z://01_Stefano/Collaboration_Data/represented_orthogroups_studyspecies_list.rds")
+
+#if we conservatively only consider TFs that are recovered in all 8 species (i.e. all bilaterian species we have data of) (6118)
+summary(TF_OGs_Ao %in% represented_orthogroups_list) #TRUE 350
+summary(TF_OGs_Bf %in% represented_orthogroups_list) #TRUE 350
+summary(TF_OGs_Pf %in% represented_orthogroups_list) #TRUE 350
+summary(TF_OGs_Sp %in% represented_orthogroups_list) #TRUE 350
+summary(TF_OGs_Pd %in% represented_orthogroups_list) #TRUE 350
+
+shared_TFs_8species  <- unique(c(TF_OGs_Ao[(TF_OGs_Ao %in% represented_orthogroups_list)==T],
+                        TF_OGs_Bf[(TF_OGs_Bf %in% represented_orthogroups_list)==T],
+                        TF_OGs_Pf[(TF_OGs_Pf %in% represented_orthogroups_list)==T],
+                        TF_OGs_Sp[(TF_OGs_Sp %in% represented_orthogroups_list)==T],
+                        TF_OGs_Pd[(TF_OGs_Pd %in% represented_orthogroups_list)==T]
+                        )
+                      )#350
+
+
+#if we only consider our 5 species of interest (6517)
+summary(TF_OGs_Ao %in% represented_orthogroups_studyspecies_list) #TRUE 367
+summary(TF_OGs_Bf %in% represented_orthogroups_studyspecies_list) #TRUE 367
+summary(TF_OGs_Pf %in% represented_orthogroups_studyspecies_list) #TRUE 367
+summary(TF_OGs_Sp %in% represented_orthogroups_studyspecies_list) #TRUE 367
+summary(TF_OGs_Pd %in% represented_orthogroups_studyspecies_list) #TRUE 367
+
+shared_TFs_5species  <- unique(c(TF_OGs_Ao[(TF_OGs_Ao %in% represented_orthogroups_studyspecies_list)==T],
+                        TF_OGs_Bf[(TF_OGs_Bf %in% represented_orthogroups_studyspecies_list)==T],
+                        TF_OGs_Pf[(TF_OGs_Pf %in% represented_orthogroups_studyspecies_list)==T],
+                        TF_OGs_Sp[(TF_OGs_Sp %in% represented_orthogroups_studyspecies_list)==T],
+                        TF_OGs_Pd[(TF_OGs_Pd %in% represented_orthogroups_studyspecies_list)==T]
+                        )
+                      )#367
+
+```
+
+```{r}
+#these include possibly the 21 broken Hox clusters, and do not have the custom Hox cluster codes
+load("Z://01_Stefano/Collaboration_Data/Annotations/Best_orthologue_all_orthogroups/dictionary_orthogroups_best_all_withHox.rds")
+
+shared_TFs_8species <- shared_TFs_8species[(shared_TFs_8species %in% rownames(dictionary_orthogroups_best_withHox))==T] #350 ->348
+shared_TFs_8species <- c(shared_TFs_8species, c("OG000PG01",   "OG000PG02",   "OG000PG0304" ,"OG000PG05" ,  "OG000PG0607", "OG000PG08",   "OG000PG0910", "OG000PG1115")) #->356 (348+8)
+
+shared_TFs_5species <- shared_TFs_5species[(shared_TFs_5species %in% rownames(dictionary_orthogroups_best_withHox))==T] #367 ->365
+shared_TFs_5species <- c(shared_TFs_5species, c("OG000PG01",   "OG000PG02",   "OG000PG0304" ,"OG000PG05" ,  "OG000PG0607", "OG000PG08",   "OG000PG0910", "OG000PG1115")) #->373 (365+8)
+
+#save(shared_TFs_8species, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/shared_TFs_8species.rds")
+#save(shared_TFs_5species, file="Z://01_Stefano/Collaboration_Data/Annotations/TFs/shared_TFs_5species.rds")
+```
+
+
+
+
+## Only keep best representative (include NA cases)
+```{r}
+#install.packages("protr")
+library(protr)
+library(vecsets)
+```
+```{r}
+#load the set of orthogroups we will consider
+#load("Z://01_Stefano/Collaboration_Data/represented_orthogroups_list.rds")
+#we will load the widest list of orthogroups, only the step after size and composition filtering
+load("Z://01_Stefano/Collaboration_Data/prefiltered_orthogroups_list.rds")
+
+#load orthogroup table
+dictionary_orthogroups <- read.table(file = "Z://01_Stefano/Collaboration_Data/Annotations/Results_Nov01/Orthogroups/Orthogroups.tsv", sep = '\t', header = TRUE)
+#fill empty cells with NA
+dictionary_orthogroups <- dictionary_orthogroups %>% mutate_all(na_if,"")
+rownames(dictionary_orthogroups) <- dictionary_orthogroups$Orthogroup
+dictionary_orthogroups <- dictionary_orthogroups[,2:ncol(dictionary_orthogroups)]
+head(dictionary_orthogroups)
+head(dictionary_orthogroups)
+```
+```{r}
+#only keep selected orthogroups (here, very loose filter)
+dictionary_orthogroups <- dictionary_orthogroups[rownames(dictionary_orthogroups) %in% prefiltered_orthogroups_list,]
+```
+
+```{r}
+#for genes with multiple entries, only keep best aligned one
+dictionary_orthogroups_best <- dictionary_orthogroups
+#this is an object with 17022 orthogroups
+```
+
+```{r}
+#ALREADY CHECKED THIS
+#we need to do a preliminary check: that we actually have the protein sequence file for all of the proteins we need to align
+
+##unlist species by species
+#tmp <- dictionary_orthogroups %>% separate_rows("Ao", sep = ", ")
+#protein_codes_Ao <- na.omit(unlist(tmp[,"Ao"],use.names = FALSE))
+  
+#tmp <- dictionary_orthogroups %>% separate_rows("Bf", sep = ", ")
+#protein_codes_Bf <- na.omit(unlist(tmp[,"Bf"],use.names = FALSE))
+
+#tmp <- dictionary_orthogroups %>% separate_rows("Pf", sep = ", ")
+#protein_codes_Pf <- na.omit(unlist(tmp[,"Pf"],use.names = FALSE))
+
+#tmp <- dictionary_orthogroups %>% separate_rows("Sp", sep = ", ")
+#protein_codes_Sp <- na.omit(unlist(tmp[,"Sp"],use.names = FALSE))
+
+#tmp <- dictionary_orthogroups %>% separate_rows("Pd", sep = ", ")
+#protein_codes_Pd <- na.omit(unlist(tmp[,"Pd"],use.names = FALSE))
+
+#tmp <- dictionary_orthogroups %>% separate_rows("Dr", sep = ", ")
+#protein_codes_Dr <- na.omit(unlist(tmp[,"Dr"],use.names = FALSE))
+
+#tmp <- dictionary_orthogroups %>% separate_rows("Mm", sep = ", ")
+#protein_codes_Mm <- na.omit(unlist(tmp[,"Mm"],use.names = FALSE))
+
+#tmp <- dictionary_orthogroups %>% separate_rows("Hs", sep = ", ")
+#protein_codes_Hs <- na.omit(unlist(tmp[,"Hs"],use.names = FALSE))
+
+
+##now load all filenames in the split folder
+#files <- list.files(path = "Z://01_Stefano/Collaboration_Data/Annotations/Proteomes/Split/",
+#                   pattern = NULL, 
+#                   full.names = FALSE)
+##remove ".fasta"
+#files <- gsub("\\.fasta.*","",files)
+
+#summary(protein_codes_Ao %in% files)
+#summary(protein_codes_Bf %in% files)
+#summary(protein_codes_Pf %in% files)
+#summary(protein_codes_Sp %in% files)
+#summary(protein_codes_Pd %in% files)
+#summary(protein_codes_Dr %in% files)
+#summary(protein_codes_Mm %in% files)
+#summary(protein_codes_Hs %in% files)
+```
+
+```{r}
+#Note that before running the code below, you need to start this on a windows powershell, because the protr alignment function for some reason opens a background rscript window/process that never closes, meaning that they accumulate and fill the memory quick
+
+#you need to give enough time so that it does not close the current alignment (I give 8 minutes), and I check every 60s
+
+#while ($True){
+#timeout /T 60
+#Get-Process Rscript | Where StartTime -lt (Get-Date).AddMinutes(-10) | Stop-Process -Force
+#}
+```
+
+
+
+
+```{r, echo=FALSE}
+#RUN THIS
+#we will launch 170 loops of  100 (total = 17'000 rows) out of 17'022
+#for (batch_index in c(0,seq(1:100))) {
+for (batch_index in c(seq(from=170, to=170))) {
+  print(batch_index)
+#we will do by batches of 100 in case it overloads
+#test <- dictionary_orthogroups_best[((batch_index*100)+1):((batch_index*100)+100),]
+test <- dictionary_orthogroups_best[17001:17022,]
+
+#results will be written row by row in a new dataframe
+results_df <- test
+results_df[,] <- NA
+
+#define path where fasta protein sequences are
+path <- "Z://01_Stefano/Collaboration_Data/Annotations/Proteomes/Split/"
+
+for (rowindex in seq(1:nrow(test))) {
+  print(rowindex)
+  #LOOP
+##for each row
+#1) extract group of proteins in each column 
+
+prots_list <- list(unlist(strsplit(test[rowindex,1], ", ")), 
+                   unlist(strsplit(test[rowindex,2], ", ")),
+                   unlist(strsplit(test[rowindex,3], ", ")),
+                   unlist(strsplit(test[rowindex,4], ", ")),
+                   unlist(strsplit(test[rowindex,5], ", ")),
+                   unlist(strsplit(test[rowindex,6], ", ")),
+                   unlist(strsplit(test[rowindex,7], ", ")),
+                   unlist(strsplit(test[rowindex,8], ", ")))
+names(prots_list) <- colnames(test)
+
+#the full set is in unlist(unname(prots_list))
+#length(unlist(unname(prots_list)))
+#the first ones here are "XP_023121984.1", "XP_023127113.1", "XP_023127127.2" 
+
+ 
+
+#2 do a reciprocal pairwise alignment score
+
+plist <- list()
+for (p in seq(1:length(unlist(unname(prots_list))))) {
+  
+  ifelse(is.na(unlist(unname(prots_list))[p]),
+         plist[p] <- "",
+         plist[p] <- readFASTA(file= paste0(path, unlist(unname(prots_list))[p], ".fasta"), seqonly = T)[[1]]
+         )
+  
+#  aaseq <- readFASTA(file= paste0(path, unlist(unname(prots_list))[p], ".fasta"), seqonly = T)[[1]]
+#  plist[p] <- aaseq
+}
+
+print("passed FASTA import")
+
+sim_mat <- protr::parSeqSim(protlist = plist,
+                     cores = 2,
+                     batches = 1,
+                     #path = ,
+                     verbose = T,
+                     type = "local",
+                     submat = "BLOSUM62",
+                     gap.opening = 2, #from 10, to try to recreate mafft defaults
+                     gap.extension = 0.1 #from 4, to try to recreate mafft defaults
+                     )
+
+
+print("passed sim_mat generation")
+#sim_mat
+
+#3 get average value (excluding same species comparisons)
+#find a way to code exclusion of same species comparisons
+
+#the number of elements in each species is stored in
+# unname(lengths(prots_list)) (here: Ao:17 Bf:19 Dr:10 Hs:4  Mm:4  Pd:9  Pf:9  Sp:7)
+#cumsum(unlist(unname(lengths(prots_list)))) 17 36 46 50 54 63 72 79
+interval_ends <- cumsum(unlist(unname(lengths(prots_list))))
+
+reference <- as.list(rep(colnames(dictionary_orthogroups_best), times = unlist(unname(lengths(prots_list)))))
+names(reference) <- seq(1:sum(unname(lengths(prots_list))))
+#so now, e/g/ for row 2 we can find species -> 
+#as.character(unname(reference[2])) = "Ao"
+
+reference2 <- list("Ao"= seq(1:interval_ends[1]),
+                  "Bf" = seq(from = (interval_ends[1]+1), to = interval_ends[2]),
+                  "Dr" = seq(from = (interval_ends[2]+1), to = interval_ends[3]),
+                  "Hs" = seq(from = (interval_ends[3]+1), to = interval_ends[4]),
+                  "Mm" = seq(from = (interval_ends[4]+1), to = interval_ends[5]),
+                  "Pd" = seq(from = (interval_ends[5]+1), to = interval_ends[6]),
+                  "Pf" = seq(from = (interval_ends[6]+1), to = interval_ends[7]),
+                  "Sp" = seq(from = (interval_ends[7]+1), to = interval_ends[8])
+                    )
+#so that unname(unlist(reference2["Ao"])) = col indeces of this category
+#hence unname(unlist(reference2[as.character(unname(reference[X]))])) where X is the rownumber
+
+
+
+#do rowsum each row, only at the indeces 
+
+average_sim_score <- c()
+for (k in seq(1:dim(sim_mat)[1])) {
+  #print(k)
+  average_sim_score[k] <- (sum(sim_mat[k,])-sum(sim_mat[k,unname(unlist(reference2[as.character(unname(reference[k]))]))])) / (((dim(sim_mat)[1] - length(reference2[[as.character(unname(reference[k]))]])))-ifelse(is.na(as.numeric(summary(vecsets::vsetdiff(sim_mat[k,], sim_mat[k,unname(unlist(reference2[as.character(unname(reference[k]))]))]) == 0)["TRUE"])), 
+                                                                                                                                                                                                                     0,
+                                                                                                                                                                                                                     as.numeric(summary(vecsets::vsetdiff(sim_mat[k,], sim_mat[k,unname(unlist(reference2[as.character(unname(reference[k]))]))]) == 0)["TRUE"]))
+                                                                                                                                                                                                                     )
+  
+  
+  # sum all  scores for prot X > remove sum scores of first species = sum all scores against all non-self species;
+  #then divide by the number of non-self proteins to get average
+  #... except the NA proteins are still included, and lower scores, so need to remove them
+  #the  number of 0 (i.e. proteins that did not exist) is given by
+  #as.numeric(summary(vecsets::vsetdiff(sim_mat[1,], sim_mat[1,unname(unlist(reference2[as.character(unname(reference[1]))]))]) == 0)[[3]])
+}
+
+
+#4 select gene with highest value
+average_sim_score 
+
+grouped_scores <- list(average_sim_score[1:interval_ends[1]],      average_sim_score[(interval_ends[1]+1):interval_ends[2]],
+average_sim_score[(interval_ends[2]+1):interval_ends[3]],
+average_sim_score[(interval_ends[3]+1):interval_ends[4]],
+average_sim_score[(interval_ends[4]+1):interval_ends[5]],
+average_sim_score[(interval_ends[5]+1):interval_ends[6]],
+average_sim_score[(interval_ends[6]+1):interval_ends[7]],
+average_sim_score[(interval_ends[7]+1):interval_ends[8]]
+                )
+
+
+#I need to replace the NA with a value, otherwise which.max will skip it
+grouped_scores <- rapply( grouped_scores, f=function(x) ifelse(is.nan(x),0,x), how="replace" )
+
+indeces <- unlist(lapply(grouped_scores, function(x) which.max(x)))
+
+max_proteins <- list()
+for (index in seq(1:length(indeces))) {
+  max_proteins[index] <- unname(unlist(prots_list[index]))[indeces[index]]
+}
+
+
+#fill in results_df
+results_df[rowindex,] <- max_proteins
+gc()
+
+closeAllConnections()
+
+}
+
+  
+  
+  save(results_df, file = paste0("Z://01_Stefano/Collaboration_Data/Annotations/all_orthogroup_df_", sprintf("%04d", batch_index),".rds")) 
+  gc()
+  
+  closeAllConnections()
+}
+
+
+
+
+
+
+
+
+
+
+```
+
+```{r}
+load("Z://01_Stefano/Collaboration_Data/Annotations/all_orthogroup_df_0010.rds")
+```
+
+
+```{r}
+#collate all files into a single file
+tmp_list <- as.list(list.files(path="Z://01_Stefano/Collaboration_Data/Annotations/Best_orthologue_all_orthogroups/", full.names = T))
+
+tmp_list2 <- lapply(tmp_list, function(x) get(load(x)))
+
+
+dictionary_orthogroups_best <- as.data.frame(data.table::rbindlist(tmp_list2))
+rownames(dictionary_orthogroups_best) <- rownames(dictionary_orthogroups)
+save(dictionary_orthogroups_best, file = "Z://01_Stefano/Collaboration_Data/Annotations/Best_orthologue_all_orthogroups/dictionary_orthogroups_best_all.rds")
+write.csv(dictionary_orthogroups_best, "Z://01_Stefano/Collaboration_Data/Annotations/Best_orthologue_all_orthogroups/dictionary_orthogroups_best_all.xlsx")
+```
+
+
+```{r}
+## ADD CUSTOM HOX GROUPS
+#we can submit our pre-prepared alternative Hox OG list to the best-selector
+custom_hox_orthogroups <- as.data.frame(read_xlsx(path="Z://01_Stefano/Collaboration_Data/Annotations/Custom_Hox_orthogroups.xlsx"))
+rownames(custom_hox_orthogroups) <- custom_hox_orthogroups$Orthogroup
+custom_hox_orthogroups <- custom_hox_orthogroups[,2:ncol(custom_hox_orthogroups)]
+```
+
+```{r}
+#NO NEED TO RUN THIS AGAIN, LOAD OUTPUT OBJECT
+##BEST selector for the Hox table
+test <- custom_hox_orthogroups
+
+#results will be written row by row in a new dataframe
+results_df <- test
+results_df[,] <- NA
+
+#define path where fasta protein sequences are
+path <- "Z://01_Stefano/Collaboration_Data/Annotations/Proteomes/Split/"
+
+for (rowindex in seq(1:nrow(test))) {
+  print(rowindex)
+  #LOOP
+##for each row
+#1) extract group of proteins in each column 
+
+prots_list <- list(unlist(strsplit(test[rowindex,1], ", ")), 
+                   unlist(strsplit(test[rowindex,2], ", ")),
+                   unlist(strsplit(test[rowindex,3], ", ")),
+                   unlist(strsplit(test[rowindex,4], ", ")),
+                   unlist(strsplit(test[rowindex,5], ", ")),
+                   unlist(strsplit(test[rowindex,6], ", ")),
+                   unlist(strsplit(test[rowindex,7], ", ")),
+                   unlist(strsplit(test[rowindex,8], ", ")))
+names(prots_list) <- colnames(test)
+
+#the full set is in unlist(unname(prots_list))
+#length(unlist(unname(prots_list)))
+#the first ones here are "XP_023121984.1", "XP_023127113.1", "XP_023127127.2" 
+
+ 
+
+#2 do a reciprocal pairwise alignment score
+
+plist <- list()
+for (p in seq(1:length(unlist(unname(prots_list))))) {
+  aaseq <- readFASTA(file= paste0(path, unlist(unname(prots_list))[p], ".fasta"), seqonly = T)[[1]]
+  plist[p] <- aaseq
+}
+
+print("passed FASTA import")
+
+sim_mat <- protr::parSeqSim(protlist = plist,
+                     cores = 2,
+                     batches = 1,
+                     #path = ,
+                     verbose = T,
+                     type = "local",
+                     submat = "BLOSUM62",
+                     gap.opening = 10,
+                     gap.extension = 4
+                     )
+
+
+print("passed sim_mat generation")
+#sim_mat
+
+#3 get average value (excluding same species comparisons)
+#find a way to code exclusion of same species comparisons
+
+#the number of elements in each species is stored in
+# unname(lengths(prots_list)) (here: Ao:17 Bf:19 Dr:10 Hs:4  Mm:4  Pd:9  Pf:9  Sp:7)
+#cumsum(unlist(unname(lengths(prots_list)))) 17 36 46 50 54 63 72 79
+interval_ends <- cumsum(unlist(unname(lengths(prots_list))))
+
+reference <- as.list(rep(colnames(dictionary_orthogroups_best), times = unlist(unname(lengths(prots_list)))))
+names(reference) <- seq(1:sum(unname(lengths(prots_list))))
+#so now, e/g/ for row 2 we can find species -> 
+#as.character(unname(reference[2])) = "Ao"
+
+reference2 <- list("Ao"= seq(1:interval_ends[1]),
+                  "Bf" = seq(from = (interval_ends[1]+1), to = interval_ends[2]),
+                  "Dr" = seq(from = (interval_ends[2]+1), to = interval_ends[3]),
+                  "Hs" = seq(from = (interval_ends[3]+1), to = interval_ends[4]),
+                  "Mm" = seq(from = (interval_ends[4]+1), to = interval_ends[5]),
+                  "Pd" = seq(from = (interval_ends[5]+1), to = interval_ends[6]),
+                  "Pf" = seq(from = (interval_ends[6]+1), to = interval_ends[7]),
+                  "Sp" = seq(from = (interval_ends[7]+1), to = interval_ends[8])
+                    )
+#so that unname(unlist(reference2["Ao"])) = col indeces of this category
+#hence unname(unlist(reference2[as.character(unname(reference[X]))])) where X is the rownumber
+
+
+
+#do rowsum each row, only at the indeces 
+
+average_sim_score <- c()
+for (k in seq(1:dim(sim_mat)[1])) {
+  
+  average_sim_score[k] <- (sum(sim_mat[k,])-sum(sim_mat[k,unname(unlist(reference2[as.character(unname(reference[k]))]))])) / (dim(sim_mat)[1] - length(reference2[[as.character(unname(reference[k]))]]))
+  
+}
+
+
+#4 select gene with highest value
+average_sim_score 
+
+grouped_scores <- list(average_sim_score[1:interval_ends[1]],      average_sim_score[(interval_ends[1]+1):interval_ends[2]],
+average_sim_score[(interval_ends[2]+1):interval_ends[3]],
+average_sim_score[(interval_ends[3]+1):interval_ends[4]],
+average_sim_score[(interval_ends[4]+1):interval_ends[5]],
+average_sim_score[(interval_ends[5]+1):interval_ends[6]],
+average_sim_score[(interval_ends[6]+1):interval_ends[7]],
+average_sim_score[(interval_ends[7]+1):interval_ends[8]]
+                )
+indeces <- unlist(lapply(grouped_scores, function(x) which.max(x)))
+
+max_proteins <- list()
+for (index in seq(1:length(indeces))) {
+  max_proteins[index] <- unname(unlist(prots_list[index]))[indeces[index]]
+}
+
+
+#fill in results_df
+results_df[rowindex,] <- max_proteins
+gc()
+
+closeAllConnections()
+
+}
+
+  
+  
+#  save(results_df, file = #"Z://01_Stefano/Collaboration_Data/Annotations/best_orthogroup_df_Hox.rds") 
+  gc()
+  
+  closeAllConnections()
+```
+
+```{r}
+#NO NEED TO RUN AGAIN
+#Merged the two together
+#original best protein in each conserved orthogroup:
+load("Z://01_Stefano/Collaboration_Data/Annotations/Best_orthologue_all_orthogroups/dictionary_orthogroups_best_all.rds") #dictionary_orthogroup_best
+
+dictionary_orthogroups_best_withHox <- dictionary_orthogroups_best
+
+#first, we need to remove any hox OG that may still be present in the orthofinder table
+dictionary_orthogroups_best_withHox <- dictionary_orthogroups_best_withHox[!(rownames(dictionary_orthogroups_best_withHox) %in% c("OG0002402", "OG0003787","OG0002536", "OG0002082", "OG0003182", "OG0014381", "OG0007873", "OG0001524", "OG0000143", "OG0010095", "OG0014380", "OG0000648", "OG0012499", "OG0019418", "OG0014281", "OG0008007", "OG0014379","OG0014282", "OG0014378", "OG0005102", "OG0014378", "OG0008729")),]
+#Note that the very problem was that Hox OG were lost because not filled for all species, and this step only removes two (PG1/OG0002402 and PG7/OG0001524), the latter however was not correct from orthofinder, and PG1 was incomplete #17001
+
+
+#now laod the best protein for custom Hox
+load("Z://01_Stefano/Collaboration_Data/Annotations/best_orthogroup_df_Hox.rds")
+best_withHox <- results_df
+rm(results_df)
+
+#merge
+dictionary_orthogroups_best_withHox <- rbind(dictionary_orthogroups_best_withHox, best_withHox) #17009(17001+8)
+
+#save(dictionary_orthogroups_best_withHox, file= "Z://01_Stefano/Collaboration_Data/Annotations/Best_orthologue_all_orthogroups/dictionary_orthogroups_best_all_withHox.rds")
+#write.csv(dictionary_orthogroups_best_withHox,  "Z://01_Stefano/Collaboration_Data/Annotations/Best_orthologue_all_orthogroups/dictionary_orthogroups_best_all_withHox.xlsx" )
+```
+
+```{r}
+summary(duplicated(na.omit(dictionary_orthogroups_best_withHox$Ao)))
+summary(duplicated(na.omit(dictionary_orthogroups_best_withHox$Bf)))
+summary(duplicated(na.omit(dictionary_orthogroups_best_withHox$Dr)))
+summary(duplicated(na.omit(dictionary_orthogroups_best_withHox$Hs)))
+summary(duplicated(na.omit(dictionary_orthogroups_best_withHox$Mm)))
+summary(duplicated(na.omit(dictionary_orthogroups_best_withHox$Pd)))
+summary(duplicated(na.omit(dictionary_orthogroups_best_withHox$Pf)))
+summary(duplicated(na.omit(dictionary_orthogroups_best_withHox$Sp)))
+```
+
+
+
+```{r}
+#and prepare the genebased version
+#we will convert each protein code into the gene code of the corresponding species
+dictionary_orthogroups_best_withHox_genebased <- dictionary_orthogroups_best_withHox
+
+#remove protein isoforms
+for (i in seq(1:nrow(dictionary_orthogroups_best_withHox_genebased))) {
+  for (j in seq(1:ncol(dictionary_orthogroups_best_withHox_genebased))){
+    dictionary_orthogroups_best_withHox_genebased[i,j] <- gsub("\\..*","",dictionary_orthogroups_best_withHox_genebased[i,j])
+  }
+}
+
+##NOTE: NEED TO COMPLETE THESE WITH HUMAN, ZEBRAFISH, AND MOUSE DICTIONARIES
+
+#load all the dictionaries
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Aoce_dictionary_standard.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Bf_dictionary_standard.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Pf_dictionary_standard.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Sp_dictionary_standard.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Pd_dictionary_standard.rds")
+
+dictionary_orthogroups_best_withHox_genebased$Ao <- Ao_dictionary_standard[match(dictionary_orthogroups_best_withHox_genebased$Ao, Ao_dictionary_standard$proteinID), "geneID"]  
+
+dictionary_orthogroups_best_withHox_genebased$Bf <- Bf_dictionary_standard[match(dictionary_orthogroups_best_withHox_genebased$Bf, Bf_dictionary_standard$proteinID), "geneID"]  
+
+dictionary_orthogroups_best_withHox_genebased$Pd <- Pd_dictionary_standard[match(dictionary_orthogroups_best_withHox_genebased$Pd, Pd_dictionary_standard$proteinID), "geneID"]  
+
+dictionary_orthogroups_best_withHox_genebased$Pf <- Pf_dictionary_standard[match(dictionary_orthogroups_best_withHox_genebased$Pf, Pf_dictionary_standard$proteinID), "geneID"]  
+
+dictionary_orthogroups_best_withHox_genebased$Sp <- Sp_dictionary_standard[match(dictionary_orthogroups_best_withHox_genebased$Sp, Sp_dictionary_standard$proteinID), "geneID"]  
+
+#save(dictionary_orthogroups_best_withHox_genebased, file = "Z://01_Stefano/Collaboration_Data/Annotations/Best_orthologue_all_orthogroups/dictionary_orthogroups_best_all_withHox_genebased.rds" )
+#write.csv(dictionary_orthogroups_best_withHox_genebased,  "Z://01_Stefano/Collaboration_Data/Annotations/Best_orthologue_all_orthogroups/dictionary_orthogroups_best_all_withHox_genebased.xlsx")
+```
+
+
+
+
+```{r}
+#CREATE LIST OF TF OGs
+##of these bilaterian-conserved orthogroups, we will onnly keep the TF ones
+dictionary_orthogroups <- read.table(file = "Z://01_Stefano/Collaboration_Data/Annotations/Results_Nov01/Orthogroups/Orthogroups.tsv", sep = '\t', header = TRUE)
+load("Z://01_Stefano/Collaboration_Data/represented_orthogroups_list.rds") #6118 orthogroups that are shared across all species
+#only keep common orthogroups
+dictionary_orthogroups_TFs <- dictionary_orthogroups[dictionary_orthogroups$Orthogroup %in% represented_orthogroups_list,] #6118
+
+#remove incomplete Hox and add custom Hox orthogroups
+dictionary_orthogroups_TFs <- dictionary_orthogroups_TFs[!(dictionary_orthogroups_TFs$Orthogroup %in% c("OG0002402", "OG0003787","OG0002536", "OG0002082", "OG0003182", "OG0014381", "OG0007873", "OG0001524", "OG0000143", "OG0010095", "OG0014380", "OG0000648", "OG0012499", "OG0019418", "OG0014281", "OG0008007", "OG0014379","OG0014282", "OG0014378", "OG0005102", "OG0014378", "OG0008729")),] #6116
+
+custom_hox_orthogroups <- as.data.frame(read_xlsx(path="Z://01_Stefano/Collaboration_Data/Annotations/Custom_Hox_orthogroups.xlsx"))
+#rownames(custom_hox_orthogroups) <- custom_hox_orthogroups$Orthogroup
+#custom_hox_orthogroups <- custom_hox_orthogroups[,2:ncol(custom_hox_orthogroups)] #8
+
+dictionary_orthogroups_TFs <- rbind(dictionary_orthogroups_TFs, custom_hox_orthogroups)
+
+#load Ao hmsearch TFs
+hmsearch_TFs <- read_excel("Z://01_Stefano/Collaboration_Data/Annotations/TFs/Ao_TF_ID.xlsx")
+hmsearch_TFs_list <- unlist(hmsearch_TFs[1]) #2408 proteins
+
+#unlist Ao columns
+dictionary_orthogroups_TFs <- dictionary_orthogroups_TFs %>% separate_rows("Ao", sep = ", ")
+#fill empty cells with NA
+dictionary_orthogroups_TFs <- dictionary_orthogroups_TFs %>% mutate_all(na_if,"")
+
+orthogroups_TFs <- unique(dictionary_orthogroups_TFs$Orthogroup[dictionary_orthogroups_TFs$Ao %in% hmsearch_TFs_list]) #331  TFs orthogroups
+#save(orthogroups_TFs, file="Z://01_Stefano/Collaboration_Data/orthogroups_TFs.rds")
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Only keep best representative (only conserved orthogroups)
+```{r}
+#install.packages("protr")
+library(protr)
+```
+
+
+```{r}
+load("Z://01_Stefano/Collaboration_Data/represented_orthogroups_list.rds")
+#load orthogroup table
+dictionary_orthogroups <- read.table(file = "Z://01_Stefano/Collaboration_Data/Annotations/Results_Nov01/Orthogroups/Orthogroups.tsv", sep = '\t', header = TRUE)
+#fill empty cells with NA
+dictionary_orthogroups <- dictionary_orthogroups %>% mutate_all(na_if,"")
+rownames(dictionary_orthogroups) <- dictionary_orthogroups$Orthogroup
+dictionary_orthogroups <- dictionary_orthogroups[,2:ncol(dictionary_orthogroups)]
+head(dictionary_orthogroups)
+head(dictionary_orthogroups)
+```
+
+```{r}
+#only keep selected orthogroups (present in all animals)
+dictionary_orthogroups <- dictionary_orthogroups[rownames(dictionary_orthogroups) %in% represented_orthogroups_list,]
+```
+
+```{r}
+#for genes with multiple entries, only keep best aligned one
+dictionary_orthogroups_best <- dictionary_orthogroups
+#this is an object with 6118 orthogroups
+```
+
+
+```{r}
+#ALREADY CHECKED THIS
+#we need to do a preliminary check: that we actually have the protein sequence file for all of the proteins we need to align
+
+##unlist species by species
+#tmp <- dictionary_orthogroups %>% separate_rows("Ao", sep = ", ")
+#protein_codes_Ao <- unlist(tmp[,"Ao"],use.names = FALSE)
+  
+#tmp <- dictionary_orthogroups %>% separate_rows("Bf", sep = ", ")
+#protein_codes_Bf <- unlist(tmp[,"Bf"],use.names = FALSE)
+
+#tmp <- dictionary_orthogroups %>% separate_rows("Pf", sep = ", ")
+#protein_codes_Pf <- unlist(tmp[,"Pf"],use.names = FALSE)
+
+#tmp <- dictionary_orthogroups %>% separate_rows("Sp", sep = ", ")
+#protein_codes_Sp <- unlist(tmp[,"Sp"],use.names = FALSE)
+
+#tmp <- dictionary_orthogroups %>% separate_rows("Pd", sep = ", ")
+#protein_codes_Pd <- unlist(tmp[,"Pd"],use.names = FALSE)
+
+#tmp <- dictionary_orthogroups %>% separate_rows("Dr", sep = ", ")
+#protein_codes_Dr <- unlist(tmp[,"Dr"],use.names = FALSE)
+
+#tmp <- dictionary_orthogroups %>% separate_rows("Mm", sep = ", ")
+#protein_codes_Mm <- unlist(tmp[,"Mm"],use.names = FALSE)
+
+#tmp <- dictionary_orthogroups %>% separate_rows("Hs", sep = ", ")
+#protein_codes_Hs <- unlist(tmp[,"Hs"],use.names = FALSE)
+
+
+##now load all filenames in the split folder
+#files <- list.files(path = "Z://01_Stefano/Collaboration_Data/Annotations/Proteomes/Split/",
+#                   pattern = NULL, 
+#                   full.names = FALSE)
+##remove ".fasta"
+#files <- gsub("\\.fasta.*","",files)
+
+#summary(protein_codes_Ao %in% files)
+#summary(protein_codes_Bf %in% files)
+#summary(protein_codes_Pf %in% files)
+#summary(protein_codes_Sp %in% files)
+#summary(protein_codes_Pd %in% files)
+#summary(protein_codes_Dr %in% files)
+#summary(protein_codes_Mm %in% files)
+#summary(protein_codes_Hs %in% files)
+```
+
+
+```{r}
+#SKIP THIS (TESTING AREA)
+
+
+#results will be written row by row in a new dataframe
+results_df <- dictionary_orthogroups_best
+results_df[,] <- NA
+
+#LOOP
+##for each row
+#1) extract group of proteins in each column 
+
+prots_list <- list(unlist(strsplit(dictionary_orthogroups_best[1,1], ", ")), 
+                   unlist(strsplit(dictionary_orthogroups_best[1,2], ", ")),
+                   unlist(strsplit(dictionary_orthogroups_best[1,3], ", ")),
+                   unlist(strsplit(dictionary_orthogroups_best[1,4], ", ")),
+                   unlist(strsplit(dictionary_orthogroups_best[1,5], ", ")),
+                   unlist(strsplit(dictionary_orthogroups_best[1,6], ", ")),
+                   unlist(strsplit(dictionary_orthogroups_best[1,7], ", ")),
+                   unlist(strsplit(dictionary_orthogroups_best[1,8], ", ")))
+names(prots_list) <- colnames(dictionary_orthogroups_best)
+
+#the full set is in unlist(unname(prots_list))
+#length(unlist(unname(prots_list)))
+#the first ones here are "XP_023121984.1", "XP_023127113.1", "XP_023127127.2" 
+
+path <- "Z://01_Stefano/Collaboration_Data/Annotations/Proteomes/Split/"
+
+#2 do a reciprocal pairwise alignment score
+
+plist <- list()
+for (p in seq(1:length(unlist(unname(prots_list))))) {
+  aaseq <- readFASTA(file= paste0(path, unlist(unname(prots_list))[p], ".fasta"), seqonly = T)[[1]]
+  plist[p] <- aaseq
+}
+
+
+sim_mat <- protr::parSeqSimDisk(protlist = plist,
+                     cores = 2,
+                     batches = 1,
+                     #path = ,
+                     verbose = T,
+                     type = "local",
+                     submat = "BLOSUM62",
+                     gap.opening = 10,
+                     gap.extension = 4
+                     )
+
+
+sim_mat
+
+#3 get average value (excluding same species comparisons)
+#find a way to code exclusion of same species comparisons
+
+#the number of elements in each species is stored in
+# unname(lengths(prots_list)) (here: Ao:17 Bf:19 Dr:10 Hs:4  Mm:4  Pd:9  Pf:9  Sp:7)
+#cumsum(unlist(unname(lengths(prots_list)))) 17 36 46 50 54 63 72 79
+interval_ends <- cumsum(unlist(unname(lengths(prots_list))))
+
+reference <- as.list(rep(colnames(dictionary_orthogroups_best), times = unlist(unname(lengths(prots_list)))))
+names(reference) <- seq(1:sum(unname(lengths(prots_list))))
+#so now, e/g/ for row 2 we can find species -> 
+#as.character(unname(reference[2])) = "Ao"
+
+reference2 <- list("Ao"= seq(1:interval_ends[1]),
+                  "Bf" = seq(from = (interval_ends[1]+1), to = interval_ends[2]),
+                  "Dr" = seq(from = (interval_ends[2]+1), to = interval_ends[3]),
+                  "Hs" = seq(from = (interval_ends[3]+1), to = interval_ends[4]),
+                  "Mm" = seq(from = (interval_ends[4]+1), to = interval_ends[5]),
+                  "Pd" = seq(from = (interval_ends[5]+1), to = interval_ends[6]),
+                  "Pf" = seq(from = (interval_ends[6]+1), to = interval_ends[7]),
+                  "Sp" = seq(from = (interval_ends[7]+1), to = interval_ends[8])
+                    )
+#so that unname(unlist(reference2["Ao"])) = col indeces of this category
+#hence unname(unlist(reference2[as.character(unname(reference[X]))])) where X is the rownumber
+
+
+names <- makeunique::make_unique(rep(colnames(dictionary_orthogroups_best), times = unlist(unname(lengths(prots_list)))),  sep = "_", wrap_in_brackets = FALSE)
+
+colnames(sim_mat) <- names
+rownames(sim_mat) <- names
+sim_mat
+
+
+reference[3]
+
+#do rowsum each row, only at the indeces 
+
+average_sim_score <- c()
+for (k in seq(1:dim(sim_mat)[1])) {
+  
+  average_sim_score[k] <- (sum(sim_mat[k,])-sum(sim_mat[k,unname(unlist(reference2[as.character(unname(reference[k]))]))])) / (dim(sim_mat)[1] - length(reference2[[as.character(unname(reference[k]))]]))
+  
+}
+
+
+#4 select gene with highest value
+average_sim_score 
+
+grouped_scores <- list(average_sim_score[1:interval_ends[1]],      average_sim_score[(interval_ends[1]+1):interval_ends[2]],
+average_sim_score[(interval_ends[2]+1):interval_ends[3]],
+average_sim_score[(interval_ends[3]+1):interval_ends[4]],
+average_sim_score[(interval_ends[4]+1):interval_ends[5]],
+average_sim_score[(interval_ends[5]+1):interval_ends[6]],
+average_sim_score[(interval_ends[6]+1):interval_ends[7]],
+average_sim_score[(interval_ends[7]+1):interval_ends[8]]
+                )
+indeces <- unlist(lapply(grouped_scores, function(x) which.max(x)))
+
+max_proteins <- list()
+for (index in seq(1:length(indeces))) {
+  max_proteins[index] <- unname(unlist(prots_list[index]))[indeces[index]]
+}
+
+
+#fill in results_df
+results_df[1,] <- max_proteins
+
+```
+
+```{r}
+#Note that before running the code below, you need to start this on a windows powershell, because the protr alignment function for some reason opens a background rscript window/process that never closes, meaning that they accumulate and fill the memory quick
+
+#you need to give enough time so that it does not close the current alignment (I give 8 minutes), and I check every 60s
+
+#while ($True){
+#timeout /T 60
+#Get-Process Rscript | Where StartTime -lt (Get-Date).AddMinutes(-10) | Stop-Process -Force
+#}
+```
+
+
+```{r, echo=FALSE}
+#RUN THIS
+#we will launch 610 loops of  10 (total = 6100 rows) out of 6118
+#for (batch_index in c(0,seq(1:100))) {
+for (batch_index in c(seq(from=61, to=61))) {
+  print(batch_index)
+#we will do by batches of 100 in case it overloads
+#test <- dictionary_orthogroups_best[((batch_index*100)+1):((batch_index*100)+100),]
+test <- dictionary_orthogroups_best[6101:6118,]
+
+#results will be written row by row in a new dataframe
+results_df <- test
+results_df[,] <- NA
+
+#define path where fasta protein sequences are
+path <- "Z://01_Stefano/Collaboration_Data/Annotations/Proteomes/Split/"
+
+for (rowindex in seq(1:nrow(test))) {
+  print(rowindex)
+  #LOOP
+##for each row
+#1) extract group of proteins in each column 
+
+prots_list <- list(unlist(strsplit(test[rowindex,1], ", ")), 
+                   unlist(strsplit(test[rowindex,2], ", ")),
+                   unlist(strsplit(test[rowindex,3], ", ")),
+                   unlist(strsplit(test[rowindex,4], ", ")),
+                   unlist(strsplit(test[rowindex,5], ", ")),
+                   unlist(strsplit(test[rowindex,6], ", ")),
+                   unlist(strsplit(test[rowindex,7], ", ")),
+                   unlist(strsplit(test[rowindex,8], ", ")))
+names(prots_list) <- colnames(test)
+
+#the full set is in unlist(unname(prots_list))
+#length(unlist(unname(prots_list)))
+#the first ones here are "XP_023121984.1", "XP_023127113.1", "XP_023127127.2" 
+
+ 
+
+#2 do a reciprocal pairwise alignment score
+
+plist <- list()
+for (p in seq(1:length(unlist(unname(prots_list))))) {
+  aaseq <- readFASTA(file= paste0(path, unlist(unname(prots_list))[p], ".fasta"), seqonly = T)[[1]]
+  plist[p] <- aaseq
+}
+
+print("passed FASTA import")
+
+sim_mat <- protr::parSeqSim(protlist = plist,
+                     cores = 2,
+                     batches = 1,
+                     #path = ,
+                     verbose = T,
+                     type = "local",
+                     submat = "BLOSUM62",
+                     gap.opening = 10,
+                     gap.extension = 4
+                     )
+
+
+print("passed sim_mat generation")
+#sim_mat
+
+#3 get average value (excluding same species comparisons)
+#find a way to code exclusion of same species comparisons
+
+#the number of elements in each species is stored in
+# unname(lengths(prots_list)) (here: Ao:17 Bf:19 Dr:10 Hs:4  Mm:4  Pd:9  Pf:9  Sp:7)
+#cumsum(unlist(unname(lengths(prots_list)))) 17 36 46 50 54 63 72 79
+interval_ends <- cumsum(unlist(unname(lengths(prots_list))))
+
+reference <- as.list(rep(colnames(dictionary_orthogroups_best), times = unlist(unname(lengths(prots_list)))))
+names(reference) <- seq(1:sum(unname(lengths(prots_list))))
+#so now, e/g/ for row 2 we can find species -> 
+#as.character(unname(reference[2])) = "Ao"
+
+reference2 <- list("Ao"= seq(1:interval_ends[1]),
+                  "Bf" = seq(from = (interval_ends[1]+1), to = interval_ends[2]),
+                  "Dr" = seq(from = (interval_ends[2]+1), to = interval_ends[3]),
+                  "Hs" = seq(from = (interval_ends[3]+1), to = interval_ends[4]),
+                  "Mm" = seq(from = (interval_ends[4]+1), to = interval_ends[5]),
+                  "Pd" = seq(from = (interval_ends[5]+1), to = interval_ends[6]),
+                  "Pf" = seq(from = (interval_ends[6]+1), to = interval_ends[7]),
+                  "Sp" = seq(from = (interval_ends[7]+1), to = interval_ends[8])
+                    )
+#so that unname(unlist(reference2["Ao"])) = col indeces of this category
+#hence unname(unlist(reference2[as.character(unname(reference[X]))])) where X is the rownumber
+
+
+
+#do rowsum each row, only at the indeces 
+
+average_sim_score <- c()
+for (k in seq(1:dim(sim_mat)[1])) {
+  
+  average_sim_score[k] <- (sum(sim_mat[k,])-sum(sim_mat[k,unname(unlist(reference2[as.character(unname(reference[k]))]))])) / (dim(sim_mat)[1] - length(reference2[[as.character(unname(reference[k]))]]))
+  
+}
+
+
+#4 select gene with highest value
+average_sim_score 
+
+grouped_scores <- list(average_sim_score[1:interval_ends[1]],      average_sim_score[(interval_ends[1]+1):interval_ends[2]],
+average_sim_score[(interval_ends[2]+1):interval_ends[3]],
+average_sim_score[(interval_ends[3]+1):interval_ends[4]],
+average_sim_score[(interval_ends[4]+1):interval_ends[5]],
+average_sim_score[(interval_ends[5]+1):interval_ends[6]],
+average_sim_score[(interval_ends[6]+1):interval_ends[7]],
+average_sim_score[(interval_ends[7]+1):interval_ends[8]]
+                )
+indeces <- unlist(lapply(grouped_scores, function(x) which.max(x)))
+
+max_proteins <- list()
+for (index in seq(1:length(indeces))) {
+  max_proteins[index] <- unname(unlist(prots_list[index]))[indeces[index]]
+}
+
+
+#fill in results_df
+results_df[rowindex,] <- max_proteins
+gc()
+
+closeAllConnections()
+
+}
+
+  
+  
+  save(results_df, file = paste0("Z://01_Stefano/Collaboration_Data/Annotations/best_orthogroup_df_", sprintf("%04d", batch_index),".rds")) 
+  gc()
+  
+  closeAllConnections()
+}
+
+
+
+
+
+
+
+
+
+
+```
+
+```{r}
+#collate all files into a single file
+tmp_list <- as.list(list.files(path="Z://01_Stefano/Collaboration_Data/Annotations/tmp/", full.names = T))
+
+tmp_list2 <- lapply(tmp_list, function(x) get(load(x)))
+
+
+dictionary_orthogroups_best <- as.data.frame(data.table::rbindlist(tmp_list2))
+rownames(dictionary_orthogroups_best) <- rownames(dictionary_orthogroups)
+#save(dictionary_orthogroups_best, file = "Z://01_Stefano/Collaboration_Data/Annotations/dictionary_orthogroups_best.rds")
+#write.csv(dictionary_orthogroups_best, "Z://01_Stefano/Collaboration_Data/Annotations/dictionary_orthogroups_best.xlsx")
+```
+
+
+```{r}
+## ADD CUSTOM HOX GROUPS
+#we can submit our pre-prepared alternative Hox OG list to the best-selector
+custom_hox_orthogroups <- as.data.frame(read_xlsx(path="Z://01_Stefano/Collaboration_Data/Annotations/Custom_Hox_orthogroups.xlsx"))
+rownames(custom_hox_orthogroups) <- custom_hox_orthogroups$Orthogroup
+custom_hox_orthogroups <- custom_hox_orthogroups[,2:ncol(custom_hox_orthogroups)]
+```
+
+```{r}
+#NO NEED TO RUN THIS AGAIN, LOAD OUTPUT OBJECT
+##BEST selector for the Hox table
+test <- custom_hox_orthogroups
+
+#results will be written row by row in a new dataframe
+results_df <- test
+results_df[,] <- NA
+
+#define path where fasta protein sequences are
+path <- "Z://01_Stefano/Collaboration_Data/Annotations/Proteomes/Split/"
+
+for (rowindex in seq(1:nrow(test))) {
+  print(rowindex)
+  #LOOP
+##for each row
+#1) extract group of proteins in each column 
+
+prots_list <- list(unlist(strsplit(test[rowindex,1], ", ")), 
+                   unlist(strsplit(test[rowindex,2], ", ")),
+                   unlist(strsplit(test[rowindex,3], ", ")),
+                   unlist(strsplit(test[rowindex,4], ", ")),
+                   unlist(strsplit(test[rowindex,5], ", ")),
+                   unlist(strsplit(test[rowindex,6], ", ")),
+                   unlist(strsplit(test[rowindex,7], ", ")),
+                   unlist(strsplit(test[rowindex,8], ", ")))
+names(prots_list) <- colnames(test)
+
+#the full set is in unlist(unname(prots_list))
+#length(unlist(unname(prots_list)))
+#the first ones here are "XP_023121984.1", "XP_023127113.1", "XP_023127127.2" 
+
+ 
+
+#2 do a reciprocal pairwise alignment score
+
+plist <- list()
+for (p in seq(1:length(unlist(unname(prots_list))))) {
+  aaseq <- readFASTA(file= paste0(path, unlist(unname(prots_list))[p], ".fasta"), seqonly = T)[[1]]
+  plist[p] <- aaseq
+}
+
+print("passed FASTA import")
+
+sim_mat <- protr::parSeqSim(protlist = plist,
+                     cores = 2,
+                     batches = 1,
+                     #path = ,
+                     verbose = T,
+                     type = "local",
+                     submat = "BLOSUM62",
+                     gap.opening = 10,
+                     gap.extension = 4
+                     )
+
+
+print("passed sim_mat generation")
+#sim_mat
+
+#3 get average value (excluding same species comparisons)
+#find a way to code exclusion of same species comparisons
+
+#the number of elements in each species is stored in
+# unname(lengths(prots_list)) (here: Ao:17 Bf:19 Dr:10 Hs:4  Mm:4  Pd:9  Pf:9  Sp:7)
+#cumsum(unlist(unname(lengths(prots_list)))) 17 36 46 50 54 63 72 79
+interval_ends <- cumsum(unlist(unname(lengths(prots_list))))
+
+reference <- as.list(rep(colnames(dictionary_orthogroups_best), times = unlist(unname(lengths(prots_list)))))
+names(reference) <- seq(1:sum(unname(lengths(prots_list))))
+#so now, e/g/ for row 2 we can find species -> 
+#as.character(unname(reference[2])) = "Ao"
+
+reference2 <- list("Ao"= seq(1:interval_ends[1]),
+                  "Bf" = seq(from = (interval_ends[1]+1), to = interval_ends[2]),
+                  "Dr" = seq(from = (interval_ends[2]+1), to = interval_ends[3]),
+                  "Hs" = seq(from = (interval_ends[3]+1), to = interval_ends[4]),
+                  "Mm" = seq(from = (interval_ends[4]+1), to = interval_ends[5]),
+                  "Pd" = seq(from = (interval_ends[5]+1), to = interval_ends[6]),
+                  "Pf" = seq(from = (interval_ends[6]+1), to = interval_ends[7]),
+                  "Sp" = seq(from = (interval_ends[7]+1), to = interval_ends[8])
+                    )
+#so that unname(unlist(reference2["Ao"])) = col indeces of this category
+#hence unname(unlist(reference2[as.character(unname(reference[X]))])) where X is the rownumber
+
+
+
+#do rowsum each row, only at the indeces 
+
+average_sim_score <- c()
+for (k in seq(1:dim(sim_mat)[1])) {
+  
+  average_sim_score[k] <- (sum(sim_mat[k,])-sum(sim_mat[k,unname(unlist(reference2[as.character(unname(reference[k]))]))])) / (dim(sim_mat)[1] - length(reference2[[as.character(unname(reference[k]))]]))
+  
+}
+
+
+#4 select gene with highest value
+average_sim_score 
+
+grouped_scores <- list(average_sim_score[1:interval_ends[1]],      average_sim_score[(interval_ends[1]+1):interval_ends[2]],
+average_sim_score[(interval_ends[2]+1):interval_ends[3]],
+average_sim_score[(interval_ends[3]+1):interval_ends[4]],
+average_sim_score[(interval_ends[4]+1):interval_ends[5]],
+average_sim_score[(interval_ends[5]+1):interval_ends[6]],
+average_sim_score[(interval_ends[6]+1):interval_ends[7]],
+average_sim_score[(interval_ends[7]+1):interval_ends[8]]
+                )
+indeces <- unlist(lapply(grouped_scores, function(x) which.max(x)))
+
+max_proteins <- list()
+for (index in seq(1:length(indeces))) {
+  max_proteins[index] <- unname(unlist(prots_list[index]))[indeces[index]]
+}
+
+
+#fill in results_df
+results_df[rowindex,] <- max_proteins
+gc()
+
+closeAllConnections()
+
+}
+
+  
+  
+#  save(results_df, file = #"Z://01_Stefano/Collaboration_Data/Annotations/best_orthogroup_df_Hox.rds") 
+  gc()
+  
+  closeAllConnections()
+```
+
+```{r}
+#NO NEED TO RUN AGAIN
+#Merged the two together
+#original best protein in each conserved orthogroup:
+load("Z://01_Stefano/Collaboration_Data/Annotations/dictionary_orthogroups_best.rds") #dictionary_orthogroup_best
+
+dictionary_orthogroups_best_withHox <- dictionary_orthogroups_best
+
+#first, we need to remove any hox OG that may still be present in the orthofinder table
+dictionary_orthogroups_best_withHox <- dictionary_orthogroups_best_withHox[!(rownames(dictionary_orthogroups_best_withHox) %in% c("OG0002402", "OG0003787","OG0002536", "OG0002082", "OG0003182", "OG0014381", "OG0007873", "OG0001524", "OG0000143", "OG0010095", "OG0014380", "OG0000648", "OG0012499", "OG0019418", "OG0014281", "OG0008007", "OG0014379","OG0014282", "OG0014378", "OG0005102", "OG0014378", "OG0008729")),]
+#Note that the very problem was that Hox OG were lost because not filled for all species, and this step only removes two (PG1/OG0002402 and PG7/OG0001524), the latter however was not correct from orthofinder, and PG1 was incomplete #6116
+
+
+#now laod the best protein for custom Hox
+load("Z://01_Stefano/Collaboration_Data/Annotations/best_orthogroup_df_Hox.rds")
+best_withHox <- results_df
+rm(results_df)
+
+#merge
+dictionary_orthogroups_best_withHox <- rbind(dictionary_orthogroups_best_withHox, best_withHox) #6124 (6116+8)
+
+#save(dictionary_orthogroups_best_withHox, file= "Z://01_Stefano/Collaboration_Data/Annotations/dictionary_orthogroups_best_withHox.rds")
+#write.csv(dictionary_orthogroups_best_withHox_genebased,  "Z://01_Stefano/Collaboration_Data/Annotations/dictionary_orthogroups_best_withHox.xlsx" )
+```
+
+```{r}
+#and prepare the genebased version
+#we will convert each protein code into the gene code of the corresponding species
+dictionary_orthogroups_best_withHox_genebased <- dictionary_orthogroups_best_withHox
+
+#remove protein isoforms
+for (i in seq(1:nrow(dictionary_orthogroups_best_withHox_genebased))) {
+  for (j in seq(1:ncol(dictionary_orthogroups_best_withHox_genebased))){
+    dictionary_orthogroups_best_withHox_genebased[i,j] <- gsub("\\..*","",dictionary_orthogroups_best_withHox_genebased[i,j])
+  }
+}
+
+##NOTE: NEED TO COMPLETE THESE WITH HUMAN, ZEBRAFISH, AND MOUSE DICTIONARIES
+
+#load all the dictionaries
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Aoce_dictionary_standard.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Bf_dictionary_standard.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Pf_dictionary_standard.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Sp_dictionary_standard.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Pd_dictionary_standard.rds")
+
+dictionary_orthogroups_best_withHox_genebased$Ao <- Ao_dictionary_standard[match(dictionary_orthogroups_best_withHox_genebased$Ao, Ao_dictionary_standard$proteinID), "geneID"]  
+
+dictionary_orthogroups_best_withHox_genebased$Bf <- Bf_dictionary_standard[match(dictionary_orthogroups_best_withHox_genebased$Bf, Bf_dictionary_standard$proteinID), "geneID"]  
+
+dictionary_orthogroups_best_withHox_genebased$Pd <- Pd_dictionary_standard[match(dictionary_orthogroups_best_withHox_genebased$Pd, Pd_dictionary_standard$proteinID), "geneID"]  
+
+dictionary_orthogroups_best_withHox_genebased$Pf <- Pf_dictionary_standard[match(dictionary_orthogroups_best_withHox_genebased$Pf, Pf_dictionary_standard$proteinID), "geneID"]  
+
+dictionary_orthogroups_best_withHox_genebased$Sp <- Sp_dictionary_standard[match(dictionary_orthogroups_best_withHox_genebased$Sp, Sp_dictionary_standard$proteinID), "geneID"]  
+
+#save(dictionary_orthogroups_best_withHox_genebased, file = "Z://01_Stefano/Collaboration_Data/Annotations/dictionary_orthogroups_best_withHox_genebased.rds" )
+#write.csv(dictionary_orthogroups_best_withHox_genebased,  "Z://01_Stefano/Collaboration_Data/Annotations/dictionary_orthogroups_best_withHox_genebased.xlsx" )
+```
+
+
+
+```{r}
+#we will convert each protein code into the gene code of the corresponding species
+dictionary_orthogroups_best_genebased <- dictionary_orthogroups_best
+
+#remove protein isoforms
+for (i in seq(1:nrow(dictionary_orthogroups_best_genebased))) {
+  for (j in seq(1:ncol(dictionary_orthogroups_best_genebased))){
+    dictionary_orthogroups_best_genebased[i,j] <- gsub("\\..*","",dictionary_orthogroups_best_genebased[i,j])
+  }
+}
+
+##NOTE: NEED TO COMPLETE THESE WITH HUMAN, ZEBRAFISH, AND MOUSE DICTIONARIES
+
+#load all the dictionaries
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Aoce_dictionary_standard.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Bf_dictionary_standard.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Pf_dictionary_standard.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Sp_dictionary_standard.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Pd_dictionary_standard.rds")
+
+dictionary_orthogroups_best_genebased$Ao <- Ao_dictionary_standard[match(dictionary_orthogroups_best_genebased$Ao, Ao_dictionary_standard$proteinID), "geneID"]  
+
+dictionary_orthogroups_best_genebased$Bf <- Bf_dictionary_standard[match(dictionary_orthogroups_best_genebased$Bf, Bf_dictionary_standard$proteinID), "geneID"]  
+
+dictionary_orthogroups_best_genebased$Pd <- Pd_dictionary_standard[match(dictionary_orthogroups_best_genebased$Pd, Pd_dictionary_standard$proteinID), "geneID"]  
+
+dictionary_orthogroups_best_genebased$Pf <- Pf_dictionary_standard[match(dictionary_orthogroups_best_genebased$Pf, Pf_dictionary_standard$proteinID), "geneID"]  
+
+dictionary_orthogroups_best_genebased$Sp <- Sp_dictionary_standard[match(dictionary_orthogroups_best_genebased$Sp, Sp_dictionary_standard$proteinID), "geneID"]  
+
+#save(dictionary_orthogroups_best_genebased, file = "Z://01_Stefano/Collaboration_Data/Annotations/dictionary_orthogroups_best_genebased.rds" )
+#write.csv(dictionary_orthogroups_best_genebased,  "Z://01_Stefano/Collaboration_Data/Annotations/dictionary_orthogroups_best_genebased.xlsx" )
+```
+
+```{r}
+#CREATE LIST OF TF OGs
+##of these bilaterian-conserved orthogroups, we will onnly keep the TF ones
+dictionary_orthogroups <- read.table(file = "Z://01_Stefano/Collaboration_Data/Annotations/Results_Nov01/Orthogroups/Orthogroups.tsv", sep = '\t', header = TRUE)
+load("Z://01_Stefano/Collaboration_Data/represented_orthogroups_list.rds") #6118 orthogroups that are shared across all species
+#only keep common orthogroups
+dictionary_orthogroups_TFs <- dictionary_orthogroups[dictionary_orthogroups$Orthogroup %in% represented_orthogroups_list,] #6118
+
+#remove incomplete Hox and add custom Hox orthogroups
+dictionary_orthogroups_TFs <- dictionary_orthogroups_TFs[!(dictionary_orthogroups_TFs$Orthogroup %in% c("OG0002402", "OG0003787","OG0002536", "OG0002082", "OG0003182", "OG0014381", "OG0007873", "OG0001524", "OG0000143", "OG0010095", "OG0014380", "OG0000648", "OG0012499", "OG0019418", "OG0014281", "OG0008007", "OG0014379","OG0014282", "OG0014378", "OG0005102", "OG0014378", "OG0008729")),] #6116
+
+custom_hox_orthogroups <- as.data.frame(read_xlsx(path="Z://01_Stefano/Collaboration_Data/Annotations/Custom_Hox_orthogroups.xlsx"))
+#rownames(custom_hox_orthogroups) <- custom_hox_orthogroups$Orthogroup
+#custom_hox_orthogroups <- custom_hox_orthogroups[,2:ncol(custom_hox_orthogroups)] #8
+
+dictionary_orthogroups_TFs <- rbind(dictionary_orthogroups_TFs, custom_hox_orthogroups)
+
+#load Ao hmsearch TFs
+hmsearch_TFs <- read_excel("Z://01_Stefano/Collaboration_Data/Annotations/TFs/Ao_TF_ID.xlsx")
+hmsearch_TFs_list <- unlist(hmsearch_TFs[1]) #2408 proteins
+
+#unlist Ao columns
+dictionary_orthogroups_TFs <- dictionary_orthogroups_TFs %>% separate_rows("Ao", sep = ", ")
+#fill empty cells with NA
+dictionary_orthogroups_TFs <- dictionary_orthogroups_TFs %>% mutate_all(na_if,"")
+
+orthogroups_TFs <- unique(dictionary_orthogroups_TFs$Orthogroup[dictionary_orthogroups_TFs$Ao %in% hmsearch_TFs_list]) #331  TFs orthogroups
+#save(orthogroups_TFs, file="Z://01_Stefano/Collaboration_Data/orthogroups_TFs.rds")
+
+
+
+```
+
+
+## Only keep random representative
+```{r}
+load("Z://01_Stefano/Collaboration_Data/represented_orthogroups_list.rds")
+#load orthogroup table
+dictionary_orthogroups <- read.table(file = "Z://01_Stefano/Collaboration_Data/Annotations/Results_Nov01/Orthogroups/Orthogroups.tsv", sep = '\t', header = TRUE)
+#fill empty cells with NA
+dictionary_orthogroups <- dictionary_orthogroups %>% mutate_all(na_if,"")
+rownames(dictionary_orthogroups) <- dictionary_orthogroups$Orthogroup
+dictionary_orthogroups <- dictionary_orthogroups[,2:ncol(dictionary_orthogroups)]
+head(dictionary_orthogroups)
+head(dictionary_orthogroups)
+```
+```{r}
+#only keep selected orthogroups
+dictionary_orthogroups <- dictionary_orthogroups[rownames(dictionary_orthogroups) %in% represented_orthogroups_list,]
+```
+
+
+```{r}
+#for genes with multiple entries, only keep random one
+dictionary_orthogroups_random <- dictionary_orthogroups
+
+for (i in seq(1:nrow(dictionary_orthogroups_random))) {
+  for (j in seq(1:ncol(dictionary_orthogroups_random))){
+    dictionary_orthogroups_random[i,j] <- sample(unlist(strsplit(dictionary_orthogroups_random[i,j], ", ")), 1)
+  }
+}
+
+#sample(unlist(strsplit(dictionary_orthogroups_random[1,1], ", ")), 1)
+```
+
+
+
+
+```{r}
+#we will convert each protein code into the gene code of the corresponding species
+dictionary_orthogroups_random_genebased <- dictionary_orthogroups_random
+
+#remove protein isoforms
+for (i in seq(1:nrow(dictionary_orthogroups_random_genebased))) {
+  for (j in seq(1:ncol(dictionary_orthogroups_random_genebased))){
+    dictionary_orthogroups_random_genebased[i,j] <- gsub("\\..*","",dictionary_orthogroups_random_genebased[i,j])
+  }
+}
+
+##NOTE: NEED TO COMPLETE THESE WITH HUMAN, ZEBRAFISH, AND MOUSE DICTIONARIES
+
+#load all the dictionaries
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Aoce_dictionary_standard.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Bf_dictionary_standard.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Pf_dictionary_standard.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Sp_dictionary_standard.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Pd_dictionary_standard.rds")
+
+dictionary_orthogroups_random_genebased$Ao <- Ao_dictionary_standard[match(dictionary_orthogroups_random_genebased$Ao, Ao_dictionary_standard$proteinID), "geneID"]  
+
+dictionary_orthogroups_random_genebased$Bf <- Bf_dictionary_standard[match(dictionary_orthogroups_random_genebased$Bf, Bf_dictionary_standard$proteinID), "geneID"]  
+
+dictionary_orthogroups_random_genebased$Pd <- Pd_dictionary_standard[match(dictionary_orthogroups_random_genebased$Pd, Pd_dictionary_standard$proteinID), "geneID"]  
+
+dictionary_orthogroups_random_genebased$Pf <- Pf_dictionary_standard[match(dictionary_orthogroups_random_genebased$Pf, Pf_dictionary_standard$proteinID), "geneID"]  
+
+dictionary_orthogroups_random_genebased$Sp <- Sp_dictionary_standard[match(dictionary_orthogroups_random_genebased$Sp, Sp_dictionary_standard$proteinID), "geneID"]  
+
+save(dictionary_orthogroups_random_genebased, file = "Z://01_Stefano/Collaboration_Data/Annotations/dictionary_orthogroups_random_genebased.rds" )
+```
+
+
+## Merged counts: From log2counts _DeSeq2
+### subset count matrices (only best orthologues (here: best) of conserved orthogroups)
+
+```{r}
+#load("Z://01_Stefano/Collaboration_Data/Annotations/dictionary_orthogroups_best_genebased.rds")
+#load("Z://01_Stefano/Collaboration_Data/Annotations/dictionary_orthogroups_best_withHox_genebased.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/Best_orthologue_all_orthogroups/dictionary_orthogroups_best_all_withHox_genebased.rds")
+## load all the count matrices
+
+#subset each
+#load("Z://01_Stefano/Collaboration_Data/log2counts_DeSeq2_Ao.rds")
+load("Z://01_Stefano/Collaboration_Data/VST_Ao_corrected.rds")
+counts_Ao <- VST_Ao_corrected
+#only keep best orthologues
+counts_Ao <- counts_Ao[rownames(counts_Ao) %in% dictionary_orthogroups_best_withHox_genebased$Ao,] #10742
+#replace gene name with corresponding orthogroup
+rownames(counts_Ao) <- rownames(dictionary_orthogroups_best_withHox_genebased[match(rownames(counts_Ao), dictionary_orthogroups_best_withHox_genebased$Ao),])
+
+load("Z://01_Stefano/Collaboration_Data/VST_Bf_corrected.rds")
+counts_Bf <- VST_Bf_corrected
+counts_Bf <- counts_Bf[rownames(counts_Bf) %in% dictionary_orthogroups_best_withHox_genebased$Bf,] #9719
+rownames(counts_Bf) <- rownames(dictionary_orthogroups_best_withHox_genebased[match(rownames(counts_Bf), dictionary_orthogroups_best_withHox_genebased$Bf),])
+
+
+load("Z://01_Stefano/Collaboration_Data/VST_Pf_corrected.rds")
+counts_Pf <- VST_Pf_corrected
+counts_Pf <- counts_Pf[rownames(counts_Pf) %in% dictionary_orthogroups_best_withHox_genebased$Pf,]#10302
+rownames(counts_Pf) <- rownames(dictionary_orthogroups_best_withHox_genebased[match(rownames(counts_Pf), dictionary_orthogroups_best_withHox_genebased$Pf),])
+
+
+load("Z://01_Stefano/Collaboration_Data/VST_Sp_corrected.rds")
+counts_Sp <- VST_Sp_corrected
+counts_Sp <- counts_Sp[rownames(counts_Sp) %in% dictionary_orthogroups_best_withHox_genebased$Sp,]#9194
+rownames(counts_Sp) <- rownames(dictionary_orthogroups_best_withHox_genebased[match(rownames(counts_Sp), dictionary_orthogroups_best_withHox_genebased$Sp),])
+
+load("Z://01_Stefano/Collaboration_Data/VST_Pd_corrected.rds")
+counts_Pd <- VST_Pd_corrected
+counts_Pd <- counts_Pd[rownames(counts_Pd) %in% dictionary_orthogroups_best_withHox_genebased$Pd,] #8388
+rownames(counts_Pd) <- rownames(dictionary_orthogroups_best_withHox_genebased[match(rownames(counts_Pd), dictionary_orthogroups_best_withHox_genebased$Pd),])
+
+```
+
+
+```{r}
+#some genes/orthogroups have 0 counts in all samples, let's filter them out
+#(note, because of the upstream prefiltering step, all genes at this point are expressed)
+counts_Ao <- counts_Ao[rowSums(counts_Ao[])>0,]  #10742
+counts_Bf <- counts_Bf[rowSums(counts_Bf[])>0,]  #9719
+counts_Pf <- counts_Pf[rowSums(counts_Pf[])>0,]  #10302
+counts_Sp <- counts_Sp[rowSums(counts_Sp[])>0,] #9194
+counts_Pd <- counts_Pd[rowSums(counts_Pd[])>0,]  #8388
+```
+
+
+```{r}
+#assess OG discrepancy
+load("Z://01_Stefano/Collaboration_Data/Annotations/TFs/all_TF_orthogroups_withHox.rds") #all_TF_orthogroups_withHox #1426
+load("Z://01_Stefano/Collaboration_Data/Annotations/Best_orthologue_all_orthogroups/dictionary_orthogroups_best_all_withHox.rds") #dictionary_orthogroups_best_withHox #17'009
+summary(all_TF_orthogroups_withHox %in% rownames(dictionary_orthogroups_best_withHox)) 
+#TRUE 1057 TF FALSE 369 TF OG are not in the final comparative dictionary
+summary(rownames(dictionary_orthogroups_best_withHox) %in% all_TF_orthogroups_withHox) 
+
+load("Z://01_Stefano/Collaboration_Data/Annotations/TFs/all_TF_orthogroups_withHox.rds") #all_TF_orthogroups_withHox #1426
+load("Z://01_Stefano/Collaboration_Data/Annotations/Best_orthologue_all_orthogroups/dictionary_orthogroups_best_all.rds") #17022
+summary(all_TF_orthogroups_withHox %in% rownames(dictionary_orthogroups_best))
+#TRUE 1057+13 TF FALSE 369-13 TF OG are not in the final comparative dictionary
+summary(rownames(dictionary_orthogroups_best) %in% all_TF_orthogroups_withHox) 
+
+load("Z://01_Stefano/Collaboration_Data/Annotations/TFs/all_TF_orthogroups_withHox.rds") #all_TF_orthogroups_withHox #1426
+dictionary_orthogroups <- read.table(file = "Z://01_Stefano/Collaboration_Data/Annotations/Results_Nov01/Orthogroups/Orthogroups.tsv", sep = '\t', header = TRUE) #24360 orthogroups across 8 species
+summary(all_TF_orthogroups_withHox %in% dictionary_orthogroups$Orthogroup)
+#TRUE 1418 TF FALSE 8 TF OG are not in the final comparative dictionary (thee 8 custom)
+```
+
+
+```{r}
+#find how many of these are TF OGs (alternative method)
+load("Z://01_Stefano/Collaboration_Data/Annotations/TFs/all_TF_orthogroups_withHox.rds")
+
+
+summary(rownames(counts_Ao) %in% all_TF_orthogroups_withHox) #720
+summary(rownames(counts_Bf) %in% all_TF_orthogroups_withHox) #542
+summary(rownames(counts_Pf) %in% all_TF_orthogroups_withHox) #613
+summary(rownames(counts_Sp) %in% all_TF_orthogroups_withHox) #495
+summary(rownames(counts_Pd) %in% all_TF_orthogroups_withHox) #507
+
+#let us find which custom hox are in each (look for custom hox orthogroup codes "OG000PG...")
+#print(all_TF_orthogroups_withHox[(all_TF_orthogroups_withHox %in% rownames(counts_Ao))==TRUE]) #all 8
+#print(all_TF_orthogroups_withHox[(all_TF_orthogroups_withHox %in% rownames(counts_Bf))==TRUE]) #all 8
+#print(all_TF_orthogroups_withHox[(all_TF_orthogroups_withHox %in% rownames(counts_Pf))==TRUE]) #all 8
+#print(all_TF_orthogroups_withHox[(all_TF_orthogroups_withHox %in% rownames(counts_Sp))==TRUE]) #all 8
+#print(all_TF_orthogroups_withHox[(all_TF_orthogroups_withHox %in% rownames(counts_Pd))==TRUE]) #7
+```
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+#meaning that now we need to further subset the conserved (and now EXPRESSED), orthogroups
+
+orthogroups <- Reduce(intersect, list(rownames(counts_Ao), rownames(counts_Bf), rownames(counts_Pf), rownames(counts_Sp), rownames(counts_Pd))) #5839
+
+
+counts_Ao <- counts_Ao[rownames(counts_Ao) %in% orthogroups,]
+colnames(counts_Ao) <- paste0("Ao_",colnames(counts_Ao) )
+counts_Bf <- counts_Bf[rownames(counts_Bf) %in% orthogroups,]
+colnames(counts_Bf) <- paste0("Bf_",colnames(counts_Bf) )
+counts_Pf <- counts_Pf[rownames(counts_Pf) %in% orthogroups,]
+colnames(counts_Pf) <- paste0("Pf_",colnames(counts_Pf) )
+counts_Sp <- counts_Sp[rownames(counts_Sp) %in% orthogroups,]
+colnames(counts_Sp) <- paste0("Sp_",colnames(counts_Sp) )
+counts_Pd <- counts_Pd[rownames(counts_Pd) %in% orthogroups,]
+colnames(counts_Pd) <- paste0("Pd_",colnames(counts_Pd) )
+
+#final rownumber:  #5839 (including Hox)
+```
+
+
+
+
+
+```{r}
+#find how many of these are TF OGs
+load("Z://01_Stefano/Collaboration_Data/Annotations/TFs/all_TF_orthogroups_withHox.rds")
+
+summary(rownames(counts_Ao) %in% all_TF_orthogroups_withHox) #285
+summary(rownames(counts_Bf) %in% all_TF_orthogroups_withHox) #285
+summary(rownames(counts_Pf) %in% all_TF_orthogroups_withHox) #285
+summary(rownames(counts_Sp) %in% all_TF_orthogroups_withHox) #285
+summary(rownames(counts_Pd) %in% all_TF_orthogroups_withHox) #285
+
+print(all_TF_orthogroups_withHox[(all_TF_orthogroups_withHox %in% rownames(counts_Ao))==TRUE])
+```
+
+
+```{r}
+#create the merged matrix
+merged_counts <- Reduce(merge, lapply(list(counts_Ao, counts_Bf, counts_Pf, counts_Sp, counts_Pd), data.table, keep.rownames = TRUE, key = "rn"))
+merged_counts <- as.data.frame(merged_counts)
+merged_counts <- as.data.frame(merged_counts)
+
+#remove extra col
+rownames(merged_counts) <- merged_counts$rn
+merged_counts <- merged_counts[,2:ncol(merged_counts)]
+
+#5839 (including Hox)
+```
+
+```{r}
+#find how many of these are TF OGs
+load("Z://01_Stefano/Collaboration_Data/Annotations/TFs/all_TF_orthogroups_withHox.rds")
+
+summary(rownames(merged_counts) %in% all_TF_orthogroups_withHox) #285
+
+```
+
+
+
+
+
+```{r}
+##SKIP? skipped
+##Normalizes expression intensities so that the intensities or log-ratios have similar distributions across a set of arrays.
+merged_counts <- normalizeBetweenArrays(merged_counts)
+```
+
+```{r}
+#save the object
+#save(merged_counts, file = "Z://01_Stefano/Collaboration_Data/Annotations/merged_counts.rds")
+```
+
+
+
+```{r}
+#for later, prepare a within-species z-score transformation
+
+zcounts_Ao <- merged_counts[,1:21]
+zcounts_Bf <- merged_counts[,22:41]
+zcounts_Pf <- merged_counts[,42:74]
+zcounts_Sp <- merged_counts[,75:110]
+zcounts_Pd <- merged_counts[,111:140]
+
+zcounts_Ao <- t(scale(t(zcounts_Ao)))
+zcounts_Bf <- t(scale(t(zcounts_Bf)))
+zcounts_Pf <- t(scale(t(zcounts_Pf)))
+zcounts_Sp <- t(scale(t(zcounts_Sp)))
+zcounts_Pd <- t(scale(t(zcounts_Pd)))
+
+#some genes have the same values in all samples, and give NaN when z-scored
+#replace Nan with 0
+zcounts_Ao[is.na(zcounts_Ao)] <- 0
+zcounts_Bf[is.na(zcounts_Bf)] <- 0
+zcounts_Pf[is.na(zcounts_Pf)] <- 0
+zcounts_Sp[is.na(zcounts_Sp)] <- 0
+zcounts_Pd[is.na(zcounts_Pd)] <- 0
+
+zmerged_counts <- Reduce(merge, lapply(list(zcounts_Ao, zcounts_Bf, zcounts_Pf, zcounts_Sp, zcounts_Pd), data.table, keep.rownames = TRUE, key = "rn"))
+zmerged_counts <- as.data.frame(zmerged_counts)
+
+#remove extra col
+rownames(zmerged_counts) <- zmerged_counts$rn
+zmerged_counts <- zmerged_counts[,2:ncol(zmerged_counts)]
+
+#save(zmerged_counts, file = "Z://01_Stefano/Collaboration_Data/Annotations/zmerged_counts.rds")
+
+```
+
+

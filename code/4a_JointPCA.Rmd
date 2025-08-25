@@ -1,0 +1,1244 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+## Merged counts: From log2counts _DeSeq2
+### subset count matrices (only best orthologues (here: best) of conserved orthogroups)
+
+```{r}
+#load("Z://01_Stefano/Collaboration_Data/Annotations/dictionary_orthogroups_best_genebased.rds")
+load("Z://01_Stefano/Collaboration_Data/Annotations/dictionary_orthogroups_best_withHox_genebased.rds")
+## load all the count matrices
+
+#subset each
+#load("Z://01_Stefano/Collaboration_Data/log2counts_DeSeq2_Ao.rds")
+load("Z://01_Stefano/Collaboration_Data/VST_Ao_corrected.rds")
+counts_Ao <- VST_Ao_corrected
+#only keep best orthologues
+counts_Ao <- counts_Ao[rownames(counts_Ao) %in% dictionary_orthogroups_best_withHox_genebased$Ao,]
+#replace gene name with corresponding orthogroup
+rownames(counts_Ao) <- rownames(dictionary_orthogroups_best_withHox_genebased[match(rownames(counts_Ao), dictionary_orthogroups_best_withHox_genebased$Ao),])
+
+load("Z://01_Stefano/Collaboration_Data/VST_Bf_corrected.rds")
+counts_Bf <- VST_Bf_corrected
+counts_Bf <- counts_Bf[rownames(counts_Bf) %in% dictionary_orthogroups_best_withHox_genebased$Bf,]
+rownames(counts_Bf) <- rownames(dictionary_orthogroups_best_withHox_genebased[match(rownames(counts_Bf), dictionary_orthogroups_best_withHox_genebased$Bf),])
+
+
+load("Z://01_Stefano/Collaboration_Data/VST_Pf_corrected.rds")
+counts_Pf <- VST_Pf_corrected
+counts_Pf <- counts_Pf[rownames(counts_Pf) %in% dictionary_orthogroups_best_withHox_genebased$Pf,]
+rownames(counts_Pf) <- rownames(dictionary_orthogroups_best_withHox_genebased[match(rownames(counts_Pf), dictionary_orthogroups_best_withHox_genebased$Pf),])
+
+
+load("Z://01_Stefano/Collaboration_Data/VST_Sp_corrected.rds")
+counts_Sp <- VST_Sp_corrected
+counts_Sp <- counts_Sp[rownames(counts_Sp) %in% dictionary_orthogroups_best_withHox_genebased$Sp,]
+rownames(counts_Sp) <- rownames(dictionary_orthogroups_best_withHox_genebased[match(rownames(counts_Sp), dictionary_orthogroups_best_withHox_genebased$Sp),])
+
+load("Z://01_Stefano/Collaboration_Data/VST_Pd_corrected.rds")
+counts_Pd <- VST_Pd_corrected
+counts_Pd <- counts_Pd[rownames(counts_Pd) %in% dictionary_orthogroups_best_withHox_genebased$Pd,]
+rownames(counts_Pd) <- rownames(dictionary_orthogroups_best_withHox_genebased[match(rownames(counts_Pd), dictionary_orthogroups_best_withHox_genebased$Pd),])
+
+```
+
+
+
+```{r}
+### LET US REMOVE PRE-ORAL AND INDEPENDENT LIVERS
+counts_Ao <- counts_Ao[,4:ncol(counts_Ao)] #removed liver
+counts_Bf <- counts_Bf[,c(1,2,3,4,5,6,7,8,13,14,15,16,17,18,19,20)] #removed hepatic sinus
+counts_Pf <- counts_Pf[,7:ncol(counts_Pf)] #removed Co and Pr
+counts_Pd <- counts_Pd[,7:ncol(counts_Pd)] #removed Co and Pr
+```
+
+```{r}
+#some genes/orthogroups have 0 counts in all samples, let's filter them out
+counts_Ao <- counts_Ao[rowSums(counts_Ao[])>0,]
+counts_Bf <- counts_Bf[rowSums(counts_Bf[])>0,]
+counts_Pf <- counts_Pf[rowSums(counts_Pf[])>0,]
+counts_Sp <- counts_Sp[rowSums(counts_Sp[])>0,]
+counts_Pd <- counts_Pd[rowSums(counts_Pd[])>0,]
+```
+
+
+```{r}
+#meaning that now we need to further subset the conserved (and now EXPRESSED), orthogroups
+
+orthogroups <- Reduce(intersect, list(rownames(counts_Ao), rownames(counts_Bf), rownames(counts_Pf), rownames(counts_Sp), rownames(counts_Pd)))
+
+
+counts_Ao <- counts_Ao[rownames(counts_Ao) %in% orthogroups,]
+colnames(counts_Ao) <- paste0("Ao_",colnames(counts_Ao) )
+counts_Bf <- counts_Bf[rownames(counts_Bf) %in% orthogroups,]
+colnames(counts_Bf) <- paste0("Bf_",colnames(counts_Bf) )
+counts_Pf <- counts_Pf[rownames(counts_Pf) %in% orthogroups,]
+colnames(counts_Pf) <- paste0("Pf_",colnames(counts_Pf) )
+counts_Sp <- counts_Sp[rownames(counts_Sp) %in% orthogroups,]
+colnames(counts_Sp) <- paste0("Sp_",colnames(counts_Sp) )
+counts_Pd <- counts_Pd[rownames(counts_Pd) %in% orthogroups,]
+colnames(counts_Pd) <- paste0("Pd_",colnames(counts_Pd) )
+
+#final rownumber: 6036 (with Hox: 6042)
+```
+
+
+
+
+
+
+```{r}
+#create the merged matrix
+merged_counts <- Reduce(merge, lapply(list(counts_Ao, counts_Bf, counts_Pf, counts_Sp, counts_Pd), data.table, keep.rownames = TRUE, key = "rn"))
+merged_counts <- as.data.frame(merged_counts)
+merged_counts <- as.data.frame(merged_counts)
+
+#remove extra col
+rownames(merged_counts) <- merged_counts$rn
+merged_counts <- merged_counts[,2:ncol(merged_counts)]
+
+```
+
+
+
+
+
+```{r}
+#SKIPPED
+##Normalizes expression intensities so that the intensities or log-ratios have similar distributions across a set of arrays.
+merged_counts <- normalizeBetweenArrays(merged_counts)
+```
+
+```{r}
+#save the object
+#save(merged_counts, file = "Z://01_Stefano/Collaboration_Data/Annotations/merged_counts.rds")
+```
+
+
+
+```{r}
+#for later, prepare a within-species z-score transformation
+
+zcounts_Ao <- merged_counts[,1:18]
+zcounts_Bf <- merged_counts[,19:34]
+zcounts_Pf <- merged_counts[,35:61]
+zcounts_Sp <- merged_counts[,62:97]
+zcounts_Pd <- merged_counts[,98:121]
+
+zcounts_Ao <- t(scale(t(zcounts_Ao)))
+zcounts_Bf <- t(scale(t(zcounts_Bf)))
+zcounts_Pf <- t(scale(t(zcounts_Pf)))
+zcounts_Sp <- t(scale(t(zcounts_Sp)))
+zcounts_Pd <- t(scale(t(zcounts_Pd)))
+
+
+
+
+
+
+
+#some genes have the same values in all samples, and give NaN when z-scored
+#replace Nan with 0
+zcounts_Ao[is.na(zcounts_Ao)] <- 0
+zcounts_Bf[is.na(zcounts_Bf)] <- 0
+zcounts_Pf[is.na(zcounts_Pf)] <- 0
+zcounts_Sp[is.na(zcounts_Sp)] <- 0
+zcounts_Pd[is.na(zcounts_Pd)] <- 0
+
+zmerged_counts <- Reduce(merge, lapply(list(zcounts_Ao, zcounts_Bf, zcounts_Pf, zcounts_Sp, zcounts_Pd), data.table, keep.rownames = TRUE, key = "rn"))
+zmerged_counts <- as.data.frame(zmerged_counts)
+
+#remove extra col
+rownames(zmerged_counts) <- zmerged_counts$rn
+zmerged_counts <- zmerged_counts[,2:ncol(zmerged_counts)]
+
+#save(zmerged_counts, file = "Z://01_Stefano/Collaboration_Data/Annotations/zmerged_counts.rds")
+
+```
+
+
+
+##correlation
+```{r, fig.width=15, fig.height=15}
+correlation_matrix <- as.matrix(cor(zmerged_counts,method="spearman"))
+Heatmap(correlation_matrix)
+```
+
+
+
+#### PCA (collated matrix)
+
+
+
+
+```{r, fig.width= 10, fig.height=4, echo=FALSE}
+## For PCA we need to start with the data in the correct format (we need conditions as row, and genes as columns)
+# transpose our counts matrix (switch rows and columns)
+counts_VST_top2000_transposed <- t(merged_counts)
+
+
+#we will change gene symbols with their description, but many genes have empty values. Where empty, we will now replace with the gene symbol
+#annotation_info$Protein_name = coalesce(annotation_info$Protein_name, #when not NA
+#                                     annotation_info$gene_id) #when NA
+
+#save the original col_names (entrez_ID)
+#old_colnames <- colnames(counts_VST_top2000_transposed)
+
+
+#colnames(counts_VST_top2000_transposed) <- annotation_info$Protein_name[match(colnames(counts_VST_top2000_transposed), annotation_info$gene_id)]
+
+#save the new col_names (gull gene description, made unique with postscripts)
+#new_colnames <- colnames(counts_VST_top2000_transposed)
+#allowing us to create a name conversion dictionary for later steps using this PCA object
+#Genename_converter <- data.frame(gene_id = old_colnames, unique_description = new_colnames)
+
+
+#we can now calculate PCA (on the top 2000 genes)
+PCAobject_top2000 <- prcomp(x=counts_VST_top2000_transposed, center = T, scale. = F)
+
+# Plot Scree Plot of our data "WHY WE USE STANDART DEV^2? WHAT IS 100, WHAT IS 2?
+{barplot(round(PCAobject_top2000$sdev^2/sum(PCAobject_top2000$sdev^2)*100,2),
+         las=2,
+         names.arg=colnames(PCAobject_top2000$x),
+         ylab="% Variance explained",
+         xlab="PCA principal components",
+         ylim =range(pretty(c(0, 30))),
+         main = "Scree plot (top2000 variant genes)"
+         )
+abline(h=100/length(colnames(PCAobject_top2000$x)), lty=2, col="dodgerblue")}
+
+
+#remove unused variables
+#rm(new_colnames, old_colnames)
+```
+```{r, fig.width= 12, fig.height=9, echo=FALSE}
+## PCA (segment colour code)
+#View(PCAobject_top2000$x)
+#View(PCAobject_top2000)
+#check the proportion of variance value
+#view (summary(PCAobject_top2000)$importance)
+#View(sample_metadata)
+# we will use ggplot, so we need to add a column with the sample names to our data
+PCAobject_top2000_ggplot <- merge(as.data.frame(PCAobject_top2000$x),
+                                  merged_metadata, #we are merging with a dataframe that has a column "segment" and "replicate" for each sample
+                                  by=0)
+
+
+plot1a <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC2,colour=species, shape=species ))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+plot1b <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC2,colour=segment, shape=replicate ))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+
+
+plot2a <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC2,colour=species, shape=species))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22 ))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC3 (", round(summary(PCAobject_top2000)$importance[8]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+
+plot2b <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC2,colour=segment, shape=replicate))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22 ))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC3 (", round(summary(PCAobject_top2000)$importance[8]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+
+plot3a <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC4,colour=species, shape=species))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  theme_classic()+ theme(legend.position="right")
+
+plot3b <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC4,colour=segment, shape=replicate))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  theme_classic()+ theme(legend.position="right")
+
+
+
+grid.arrange(plot1a, plot1b, 
+             plot2a, plot2b,
+             plot3a, plot3b,
+             ncol=2, nrow=3)
+
+#remove unused variables
+#rm(plot1, plot2, plot3)
+
+```
+#### PCA (species-specific z-scored matrix)
+
+
+```{r, fig.width= 10, fig.height=4, echo=FALSE}
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/merged_metadata.rds") #merged_metadata
+#load("Z://01_Stefano/Collaboration_Data/Annotations/zmerged_counts.rds") #zmerged_counts
+
+#### AVERAGE OR NOT? (comment/uncomment)
+#zmerged_counts_averaged <- data.frame(matrix(nrow=nrow(zmerged_counts),ncol=0))
+#group_indeces <- c(0, cumsum(unname( table(merged_metadata$segment))))
+#for (i in seq(1:(length(group_indeces)-1))) {
+  #print(i)
+  #print(paste0(i, "->" ,(group_indeces[i]+1),"_" ,group_indeces[i+1]))
+#  tmp <- zmerged_counts[,(group_indeces[i]+1):group_indeces[i+1]]
+#  
+#  tmp_averages <- rowMeans(tmp)
+#  zmerged_counts_averaged <- cbind(zmerged_counts_averaged, tmp_averages)
+#  
+#}
+#colnames(zmerged_counts_averaged) <- paste0(unique(merged_metadata$segment), "_mean")
+#zmerged_counts<- zmerged_counts_averaged
+
+#merged_metadata_averaged <- merged_metadata
+#merged_metadata_averaged <- #merged_metadata_averaged[!duplicated(merged_metadata_averaged$segment),]
+#rownames(merged_metadata_averaged) <- paste0(merged_metadata_averaged$segment, "_mean")
+#merged_metadata <- merged_metadata_averaged
+###
+
+## For PCA we need to start with the data in the correct format (we need conditions as row, and genes as columns)
+# transpose our counts matrix (switch rows and columns)
+counts_VST_top2000_transposed <- t(zmerged_counts)
+
+
+#we will change gene symbols with their description, but many genes have empty values. Where empty, we will now replace with the gene symbol
+#annotation_info$Protein_name = coalesce(annotation_info$Protein_name, #when not NA
+#                                     annotation_info$gene_id) #when NA
+
+#save the original col_names (entrez_ID)
+#old_colnames <- colnames(counts_VST_top2000_transposed)
+
+
+#colnames(counts_VST_top2000_transposed) <- annotation_info$Protein_name[match(colnames(counts_VST_top2000_transposed), annotation_info$gene_id)]
+
+#save the new col_names (gull gene description, made unique with postscripts)
+#new_colnames <- colnames(counts_VST_top2000_transposed)
+#allowing us to create a name conversion dictionary for later steps using this PCA object
+#Genename_converter <- data.frame(gene_id = old_colnames, unique_description = new_colnames)
+
+
+#we can now calculate PCA (on the top 2000 genes)
+PCAobject_top2000 <- prcomp(x=counts_VST_top2000_transposed, center = T, scale. = T)
+
+# Plot Scree Plot of our data "WHY WE USE STANDART DEV^2? WHAT IS 100, WHAT IS 2?
+{barplot(round(PCAobject_top2000$sdev^2/sum(PCAobject_top2000$sdev^2)*100,2),
+         las=2,
+         names.arg=colnames(PCAobject_top2000$x),
+         ylab="% Variance explained",
+         xlab="PCA principal components",
+         ylim =range(pretty(c(0, 25))),
+         xlim = c(0,25),
+         main = "Scree plot (top2000 variant genes)"
+         )
+abline(h=100/length(colnames(PCAobject_top2000$x)), lty=2, col="dodgerblue")}
+
+#remove unused variables
+#rm(new_colnames, old_colnames)
+```
+
+```{r}
+#find cumulative variance explained 
+round(cumsum((PCAobject_top2000$sdev^2/sum(PCAobject_top2000$sdev^2)*100)),2)
+```
+
+
+```{r, fig.width= 12, fig.height=9, echo=FALSE}
+## PCA (segment colour code)
+#View(PCAobject_top2000$x)
+#View(PCAobject_top2000)
+#check the proportion of variance value
+#view (summary(PCAobject_top2000)$importance)
+#View(sample_metadata)
+# we will use ggplot, so we need to add a column with the sample names to our data
+PCAobject_top2000_ggplot <- merge(as.data.frame(PCAobject_top2000$x),
+                                  merged_metadata, #we are merging with a dataframe that has a column "segment" and "replicate" for each sample
+                                  by=0)
+
+
+plot1a <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC2,colour=species, shape=species ))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+plot1b <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC2,colour=segment, shape=species ))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+
+
+plot2a <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC2,colour=species, shape=species))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22 ))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC3 (", round(summary(PCAobject_top2000)$importance[8]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+
+plot2b <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC2,colour=segment, shape=replicate))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22 ))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC3 (", round(summary(PCAobject_top2000)$importance[8]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+
+plot3a <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC4,colour=species, shape=species))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  theme_classic()+ theme(legend.position="right")
+
+plot3b <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC4,colour=segment, shape=replicate))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  theme_classic()+ theme(legend.position="right")
+
+
+
+grid.arrange(plot1a, plot1b, 
+             plot2a, plot2b,
+             plot3a, plot3b,
+             ncol=2, nrow=3)
+
+#remove unused variables
+#rm(plot1, plot2, plot3)
+
+```
+
+```{r}
+color_categorical_all <- c("dodgerblue", "blue", "goldenrod", "goldenrod", "goldenrod1", "orchid",
+                           "green3", "dodgerblue2", "goldenrod1", "orchid",
+                          "dodgerblue2", "dodgerblue2", "dodgerblue3", "dodgerblue3", "indianred", "indianred2", "goldenrod1", "goldenrod1", "orchid",
+                           "dodgerblue", "dodgerblue2",  "goldenrod",  "goldenrod",  "goldenrod",  "goldenrod", "goldenrod1", "goldenrod1", "orchid",
+                            "dodgerblue2", "dodgerblue2", "goldenrod", "goldenrod",  "goldenrod1", "goldenrod1", "orchid",  "orchid2"
+                           )
+```
+
+```{r, fig.height=8, fig.width=12}
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC2,colour=segment, shape=species ))+
+  geom_point(size=4)+
+  scale_color_manual(values = color_categorical_all)+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-100, 100)+
+  #ylim(-100, 100)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="none")
+```
+
+
+```{r, fig.width=9, fig.height=6}
+#plot the position of each species
+plotlist <- list()
+for (i in seq(1:5)) {
+  colors <- rep("gray", 5)
+  colors[i] <- c("chocolate1", "lightcoral", "hotpink2","orchid", "skyblue")[i]
+  plotlist[[i]] <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC2,colour=species ))+
+  geom_point(size=2)+
+  scale_color_manual(values = colors)+
+  ylim(-90, 90)+
+  xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) +
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  ggtitle(c("Ao", "Bf", "Pf", "Sp", "Pd")[i])+  
+  theme_classic()+ theme(legend.position="none")
+}
+
+do.call("grid.arrange", c(plotlist, ncol=3))
+```
+```{r, fig.width=9, fig.height=6}
+#plot segments within each species
+color_list <- list(rep("gray", 7),rep("gray", 5),rep("gray", 11),rep("gray", 9),rep("gray", 10))
+
+plotlist <- list()
+for (i in seq(1:5)) {
+  colors <- color_list
+  colors[[i]] <-  color_categorical_all[((cumsum(lengths(colors))[i]-lengths(colors)[i])+1):(cumsum(lengths(colors))[i])]
+  plotlist[[i]] <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC9,colour=segment))+
+  geom_point(size=2)+
+  scale_color_manual(values = unlist(colors))+
+  ylim(-90, 90)+
+  xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) +
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  ggtitle(c("Ao", "Bf", "Pf", "Sp", "Pd")[i])+  
+  theme_classic()+ theme(legend.position="none")
+}
+
+do.call("grid.arrange", c(plotlist, ncol=3))
+```
+
+```{r, fig.height=8, fig.width=6}
+plot_ly(data = PCAobject_top2000_ggplot, 
+        x = ~PC1, y = ~PC2, z = ~PC9, 
+        color = ~segment, 
+        #symbol = ~species,
+        #colors = c("chocolate1", "green3", "pink","orchid", "skyblue"),
+        colors = color_categorical_all,
+        #colors = c("indianred1", "dodgerblue", "dodgerblue"),
+        #colors = colorRampPalette(brewer.pal(name = "RdBu", n = 9))(13),
+        type = "scatter3d", 
+        mode = "markers", 
+        marker = list(size = 2, width=2), # controls size of points
+        text=~segment, #This is that extra column we made earlier for which we will use for cell ID
+        hoverinfo="text") #When you visualize your plotly object, hovering your mouse pointer over a point shows cell names
+
+
+```
+
+
+
+```{r, fig.height=8}
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC2,colour=segment, shape=species ))+
+  geom_point(size=3)+
+  scale_color_manual(values = color_categorical_all)+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="bottom")
+```
+
+
+
+```{r, fig.height=8}
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC9,colour=segment, shape=species ))+
+  geom_point(size=3)+
+  scale_color_manual(values = color_categorical_all)+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="bottom")
+```
+
+
+```{r, fig.height=8}
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC5,PC6,colour=segment, shape=species ))+
+  geom_point(size=3)+
+  scale_color_manual(values = color_categorical_all)+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="bottom")
+```
+
+
+```{r, fig.height=8}
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC7,PC8,colour=segment, shape=species ))+
+  geom_point(size=3)+
+  scale_color_manual(values = color_categorical_all)+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="bottom")
+```
+
+```{r, fig.height=8}
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC9,PC10,colour=segment, shape=species ))+
+  geom_point(size=3)+
+  scale_color_manual(values = color_categorical_all)+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="bottom")
+```
+
+```{r, fig.height=8}
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC11,PC12,colour=segment, shape=species ))+
+  geom_point(size=3)+
+  scale_color_manual(values = color_categorical_all)+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="bottom")
+```
+
+```{r}
+#find which component is most associated with given genes
+names(summary(PCAobject_top2000))
+summary(PCAobject_top2000)$x #this is the value of each sample on each PC (scores)
+summary(PCAobject_top2000)$rotation #this is the value of each orthogroup/gene in the building of each PC (loadings) 
+
+loadings <- as.data.frame(summary(PCAobject_top2000)$rotation)
+loadings_subset <- loadings[rownames(loadings) %in% c("OG0002094", "OG000PG0910", "OG000PG1115"),]
+
+which.min(loadings_subset[1,])
+which.min(loadings_subset[2,])
+which.min(loadings_subset[3,])
+
+loadings_subset <- loadings[rownames(loadings) %in% c("OG0001188"),]
+which.max(loadings_subset[1,])
+head(loadings)
+```
+```{r, fig.height=8, fig.width=12}
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC9,colour=segment, shape=species ))+
+  geom_point(size=4)+
+  scale_color_manual(values = color_categorical_all)+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  xlim(-40, 40)+
+  ylim(-40, 40)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="none")
+```
+
+```{r}
+#find which component is most associated with given genes
+names(summary(PCAobject_top2000))
+summary(PCAobject_top2000)$x #this is the value of each sample on each PC (scores)
+summary(PCAobject_top2000)$rotation #this is the value of each orthogroup/gene in the building of each PC (loadings) 
+
+loadings <- as.data.frame(summary(PCAobject_top2000)$rotation)
+loadings_subset <- loadings[rownames(loadings) %in% c("OG0002094", "OG000PG1115"),]
+loadings_subset
+
+#find component with the maximal divergence between posterior hox/OG000PG1115 and sox2/"OG0001188"
+
+loadings_subset <- rbind(loadings_subset, abs(loadings_subset[1,]-loadings_subset[2,]))
+loadings_subset
+
+which.min(loadings_subset[3,])
+
+
+```
+```{r, fig.height=6, fig.width=6}
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC112,PC139,colour=segment, shape=species ))+
+  geom_point(size=2)+
+  scale_color_manual(values = color_categorical_all)+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-90, 90)+
+  #ylim(-90, 90)+
+  #xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  #ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="bottom")
+```
+
+
+
+```{r, echo=FALSE}
+#orient ourselves with sox2, gsx, pdx, cdx
+#sox2 OG0001188
+#gsx OG0003769
+#pdx OG0008903
+#cdx OG0002094
+#Hox1115
+#Hox
+
+
+selected_genes <- c("OG0001188","OG0003769","OG0008903","OG0002094")
+summary("OG0003769" %in% rownames(zmerged_counts))
+
+counts_VST_selectedgenes <- subset(zmerged_counts, rownames(zmerged_counts) %in% selected_genes)
+
+#Ao_geneID <- dictionary_orthogroups_best_genebased$Ao[match(selected_genes ,rownames(dictionary_orthogroups_best_genebased))]
+
+load("C://Users/Doctor/Desktop/RNAseq_analyses/annotation_info_NCBIEnsembl_curated_20240411.rds")
+annotation_info_Ao <- annotation_info_NCBIEnsembl
+rm(annotation_info_NCBIEnsembl)
+
+#convert rownames to Ao geneID
+rownames(counts_VST_selectedgenes) <- dictionary_orthogroups_best_genebased$Ao[match(rownames(counts_VST_selectedgenes) ,rownames(dictionary_orthogroups_best_genebased))] 
+
+#convert rownames to Ao description
+rownames(counts_VST_selectedgenes) <- annotation_info_Ao$merged_description[match(rownames(counts_VST_selectedgenes) ,annotation_info_Ao$entrez_ID)] 
+
+```
+
+
+```{r, fig.height=4, fig.width=20}
+Heatmap(as.matrix(counts_VST_selectedgenes),
+        cluster_columns = F,
+        column_split = merged_metadata$species,
+        col = rev(brewer.pal(11,"RdBu"))
+        )
+```
+
+#### find main drivers of PC1
+
+```{r, echo=FALSE}
+##plot top 50 contributing genes to PCA1 (liver vs others)
+#find list of top (50) contributing genes
+contrib_data <- fviz_contrib(PCAobject_top2000, choice = "var", 
+                             axes = 1, 
+                             top = 50
+                             )
+
+#PC1PC2_TOP50_contributors <- contrib_data[["plot_env"]][["data_sum"]][["name"]]
+PC1_TOP50_contributors <- data.frame("orthogroup" = sapply(contrib_data[["plot_env"]][["data_sum"]][["name"]], as.character), 
+                                        "contribution to PC1PC2" = contrib_data[["plot_env"]][["data_sum"]][["contrib"]])
+
+
+
+#add a column with the ocellaris gene for that orthogroup
+PC1_TOP50_contributors$Ao_geneID <- dictionary_orthogroups_best_genebased$Ao[match(PC1_TOP50_contributors$orthogroup ,rownames(dictionary_orthogroups_best_genebased))]
+
+#add a column with the ocellaris description for that gene
+load("C://Users/Doctor/Desktop/RNAseq_analyses/annotation_info_NCBIEnsembl_curated_20240411.rds")
+annotation_info_Ao <- annotation_info_NCBIEnsembl
+rm(annotation_info_NCBIEnsembl)
+
+PC1_TOP50_contributors$Ao_description <- annotation_info_Ao$merged_description[match(PC1_TOP50_contributors$Ao_geneID ,annotation_info_Ao$entrez_ID)] 
+
+
+
+#rearrange column order
+PC1_TOP50_contributors <- PC1_TOP50_contributors[,c(1, 3,4,2)]
+
+#list top contributing genes
+kable(PC1_TOP50_contributors, caption = "Top50 genes driving PC1 separation")
+
+#save dataframe for manual annotation
+#write.csv(PC1PC2_TOP50_contributors,"C://Users/Doctor/Desktop/RNAseq_analyses/Aocellaris_metamorphosis/Saved_objects/PC1PC2_TOP50_contributors_onTop1000variantgenes.csv",row.names = FALSE)
+
+
+## Formattable output
+
+formattable(PC1_TOP50_contributors, 
+             caption ="Top50 genes driving PC1 separation",
+            align =c("c","l", "l", "c"), 
+            list(`Ao_geneID` = formatter("span", 
+                                      style = x ~ formattable::style(
+                                        color = "#A9A9A9", font.weight = "bold")
+                                      ), 
+                 `Ao_description` = formatter("span", 
+                                      style = x ~ formattable::style(
+                                        color = "#A9A9A9")
+                                      ), 
+                 `contribution.to.PC1PC2`= color_tile(NA,"lightcoral")
+
+                 )
+            )
+
+#removed unused variables
+rm(contrib_data)
+
+```
+
+```{r, fig.width=10, fig.height=60, echo=FALSE}
+#http://agroninfotech.blogspot.com/2020/06/biplot-for-pcs-using-base-graphic.html
+# we can now verify how these top 50 genes actually move our samples across dimensions
+# define palette
+mypalette <- brewer.pal(9,"RdBu") #function. “RdYlBu” is a common choice, and “Spectral” is also nice.
+morecols <- colorRampPalette(mypalette)
+colorrange=rev(morecols(100))
+
+#set rows and columns (4)
+par(mfrow=c((length(unlist(PC1_TOP50_contributors["orthogroup"]))/3)+1,3))
+
+#plot loop
+for (i in 1:length(unlist(PC1_TOP50_contributors["orthogroup"]))) {
+  gene_of_interest <- unlist(PC1_TOP50_contributors["orthogroup"])[i]
+  
+  #normalise values of expression for gene X (e.g hbae5)
+  #colorvalues <- 100*(counts_VST_top1000_transposed[,gene_of_interest]+abs(min(counts_VST_top1000_transposed[,gene_of_interest])))/(max(counts_VST_top1000_transposed[,gene_of_interest]+abs(min(counts_VST_top1000_transposed[,gene_of_interest])))) #transpose all values above 0 by adding minimal value (could be negative) to all. The normalised by max intensity to 1. Then on 100 scale
+  colorvalues <- 100*((counts_VST_top2000_transposed[,gene_of_interest]-min(counts_VST_top2000_transposed[,gene_of_interest]))/((max(counts_VST_top2000_transposed[,gene_of_interest]))-(min(counts_VST_top2000_transposed[,gene_of_interest]))))
+  
+  
+  #color datapoints (observations) by expression level
+  par(pty = "s",
+    cex.main = 1.2,
+    cex.lab = 1,
+    font.main = 2,
+    font.lab = 2,
+    family = "sans",
+    col.main = "gray10",
+    col.lab = "gray10",
+    fg = "gray10",
+    las = 1)
+  
+  plot.new()
+  
+  #we are first going to plot the different conditions (samples), which are in PCAobject_top2000$x 
+  plot.window(xlim = extendrange(range(PCAobject_top2000$x[, 1]), f = 0.1), 
+            ylim = extendrange(range(PCAobject_top2000$x[, 2]), f = 0.1), 
+            asp = 1)
+  axis(side = 1, 
+     labels = TRUE)
+  axis(side = 2, 
+     labels = TRUE)
+  title(main = PC1_TOP50_contributors$Ao_description[match(gene_of_interest, PC1_TOP50_contributors$orthogroup)],
+        xlab = paste("PC 1 (", 
+                   round(summary(PCAobject_top2000)$importance[2]*100, 
+                         digits = 1),
+                   "%)", 
+                   sep = ""), 
+      ylab = paste("PC 2 (", 
+                   round(summary(PCAobject_top2000)$importance[5]*100, 
+                         digits = 1),
+                   "%)", 
+                   sep = ""), 
+      #line = 2,
+      adj = 0.5)
+  
+  # plot the different conditions (samples)
+  points(x = PCAobject_top2000$x[,1:2],
+       pch = 16,
+       cex = 2,
+       col = colorrange[colorvalues]
+       #col = rep(c("black","gray50", "gray35"),each=7)
+       )
+  
+  #text(PCAobject_top2000$x[,1:2]-5, 
+  #     labels = row.names(PCAobject_top2000$x), 
+  #     cex = 0.8,
+  #     font = 2,
+  #     col = "black"
+  #     )
+  
+  
+}
+
+#remove unused variables
+#rm(colorrange, colorvalues, gene_of_interest, i, mypalette, morecols)
+```
+
+```{r, echo=FALSE}
+#plot these genes
+selected_genes <- PC1_TOP50_contributors$orthogroup
+counts_VST_selectedgenes <- subset(zmerged_counts, rownames(zmerged_counts) %in% selected_genes)
+
+rownames(counts_VST_selectedgenes) <- PC1_TOP50_contributors$Ao_description[match(rownames(counts_VST_selectedgenes) ,PC1_TOP50_contributors$orthogroup)] 
+
+```
+
+
+```{r, fig.height=10}
+Heatmap(as.matrix(counts_VST_selectedgenes),
+        cluster_columns = F,
+        column_split = merged_metadata$species,
+        col = rev(brewer.pal(11,"RdBu"))
+        )
+```
+
+
+
+#### PCA (species-specific z-scored matrix, TFs only)
+
+
+```{r, fig.width= 10, fig.height=4, echo=FALSE}
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/merged_metadata.rds") #merged_metadata
+load("Z://01_Stefano/Collaboration_Data/Annotations/zmerged_counts.rds") #zmerged_counts
+
+#### AVERAGE OR NOT? (comment/uncomment)
+zmerged_counts_averaged <- data.frame(matrix(nrow=nrow(zmerged_counts),ncol=0))
+group_indeces <- c(0, cumsum(unname( table(merged_metadata$segment))))
+for (i in seq(1:(length(group_indeces)-1))) {
+  #print(i)
+  #print(paste0(i, "->" ,(group_indeces[i]+1),"_" ,group_indeces[i+1]))
+  tmp <- zmerged_counts[,(group_indeces[i]+1):group_indeces[i+1]]
+  
+  tmp_averages <- rowMeans(tmp)
+  zmerged_counts_averaged <- cbind(zmerged_counts_averaged, tmp_averages)
+  
+}
+colnames(zmerged_counts_averaged) <- paste0(unique(merged_metadata$segment), "_mean")
+zmerged_counts<- zmerged_counts_averaged
+
+merged_metadata_averaged <- merged_metadata
+merged_metadata_averaged <- merged_metadata_averaged[!duplicated(merged_metadata_averaged$segment),]
+rownames(merged_metadata_averaged) <- paste0(merged_metadata_averaged$segment, "_mean")
+merged_metadata <- merged_metadata_averaged
+###
+
+
+## For PCA we need to start with the data in the correct format (we need conditions as row, and genes as columns)
+
+load("Z://01_Stefano/Collaboration_Data/orthogroups_TFs.rds") #331 TF orthogroups #orthogroups_TFs
+#subset with only TF orthogroups
+zmerged_counts_TFs <- zmerged_counts[rownames(zmerged_counts) %in% orthogroups_TFs,] #325 orthogroups left
+# transpose our counts matrix (switch rows and columns)
+counts_VST_top2000_transposed <- t(zmerged_counts_TFs)
+
+
+#we will change gene symbols with their description, but many genes have empty values. Where empty, we will now replace with the gene symbol
+#annotation_info$Protein_name = coalesce(annotation_info$Protein_name, #when not NA
+#                                     annotation_info$gene_id) #when NA
+
+#save the original col_names (entrez_ID)
+#old_colnames <- colnames(counts_VST_top2000_transposed)
+
+
+#colnames(counts_VST_top2000_transposed) <- annotation_info$Protein_name[match(colnames(counts_VST_top2000_transposed), annotation_info$gene_id)]
+
+#save the new col_names (gull gene description, made unique with postscripts)
+#new_colnames <- colnames(counts_VST_top2000_transposed)
+#allowing us to create a name conversion dictionary for later steps using this PCA object
+#Genename_converter <- data.frame(gene_id = old_colnames, unique_description = new_colnames)
+
+
+#we can now calculate PCA (on the top 2000 genes)
+PCAobject_top2000 <- prcomp(x=counts_VST_top2000_transposed, center = T, scale. = T)
+
+# Plot Scree Plot of our data "WHY WE USE STANDART DEV^2? WHAT IS 100, WHAT IS 2?
+{barplot(round(PCAobject_top2000$sdev^2/sum(PCAobject_top2000$sdev^2)*100,2),
+         las=2,
+         names.arg=colnames(PCAobject_top2000$x),
+         ylab="% Variance explained",
+         xlab="PCA principal components",
+         ylim =range(pretty(c(0, 25))),
+         xlim = c(0,30),
+         main = "Scree plot (top2000 variant genes)"
+         )
+abline(h=100/length(colnames(PCAobject_top2000$x)), lty=2, col="dodgerblue")}
+
+
+#remove unused variables
+#rm(new_colnames, old_colnames)
+```
+
+```{r}
+#find cumulative variance explained 
+round(cumsum((PCAobject_top2000$sdev^2/sum(PCAobject_top2000$sdev^2)*100)),2)
+```
+
+```{r, fig.width= 12, fig.height=9, echo=FALSE}
+## PCA (segment colour code)
+#View(PCAobject_top2000$x)
+#View(PCAobject_top2000)
+#check the proportion of variance value
+#view (summary(PCAobject_top2000)$importance)
+#View(sample_metadata)
+# we will use ggplot, so we need to add a column with the sample names to our data
+PCAobject_top2000_ggplot <- merge(as.data.frame(PCAobject_top2000$x),
+                                  merged_metadata, #we are merging with a dataframe that has a column "segment" and "replicate" for each sample
+                                  by=0)
+
+
+plot1a <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC2,colour=species, shape=species ))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+plot1b <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC2,colour=segment, shape=species ))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+
+
+plot2a <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC2,colour=species, shape=species))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22 ))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC3 (", round(summary(PCAobject_top2000)$importance[8]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+
+plot2b <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC2,colour=segment, shape=replicate))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22 ))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC3 (", round(summary(PCAobject_top2000)$importance[8]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+
+plot3a <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC4,colour=species, shape=species))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  theme_classic()+ theme(legend.position="right")
+
+plot3b <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC4,colour=segment, shape=replicate))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  theme_classic()+ theme(legend.position="right")
+
+
+
+grid.arrange(plot1a, plot1b, 
+             plot2a, plot2b,
+             plot3a, plot3b,
+             ncol=2, nrow=3)
+
+#remove unused variables
+#rm(plot1, plot2, plot3)
+
+```
+
+
+
+###THIS PCA (species-specific z-scored matrix, TFs only, only selected tissue)
+
+
+```{r, fig.width= 10, fig.height=4, echo=FALSE}
+#A lot of variability and associations int he datasat are either driven, or organised aorund clownfish liver, sea urchin phatynx + oesophagus, or Pf Co+Pr
+#Let us see what happens if we remove them from the analysis (of course, we loose the information about what tissue they may be similar to in other species)
+
+#load and  subset merged_metadata
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/merged_metadata.rds") #merged_metadata
+merged_metadata <- merged_metadata[!(row(merged_metadata)[,1] %in% c(1,2,3, #Ao liver
+                                                                     22,23,24,25, #Bf endostyle
+                                                                     42, 43, 44,45,46,47, #Pf anterior 2
+                                                                     #71,72,73,75,76,77,78,79, 80,81,82,
+                                                                     111,112,113, 114,115, 116 #Pd mouh
+                                                                     )),]
+merged_metadata$segment <- factor(merged_metadata$segment, levels = unique(merged_metadata$segment))
+
+#recreate zscored matrix without considering the values of those samples
+load("Z://01_Stefano/Collaboration_Data/Annotations/merged_counts.rds") #merged_counts
+
+zcounts_Ao <- merged_counts[ , 4:21]
+zcounts_Bf <- merged_counts[ , 26:41]
+zcounts_Pf <- merged_counts[ , 48:74]
+zcounts_Sp <- merged_counts[ , 75:110]
+zcounts_Pd <- merged_counts[ , 117:140]
+
+zcounts_Ao <- t(scale(t(zcounts_Ao)))
+zcounts_Bf <- t(scale(t(zcounts_Bf)))
+zcounts_Pf <- t(scale(t(zcounts_Pf)))
+zcounts_Sp <- t(scale(t(zcounts_Sp)))
+zcounts_Pd <- t(scale(t(zcounts_Pd)))
+
+#TRY BUT EXPERIMENTAL
+#https://stats.stackexchange.com/questions/178626/how-to-normalize-data-between-1-and-1
+#for (i in seq(1:nrow(zcounts_Ao))) {
+#  zcounts_Ao[i,] <- (2*((zcounts_Ao[i,]-min(zcounts_Ao[i,]))/(max(zcounts_Ao[i,])-min(zcounts_Ao[i,]))))-1
+#}
+
+#for (i in seq(1:nrow(zcounts_Bf))) {
+#  zcounts_Bf[i,] <- (2*((zcounts_Bf[i,]-min(zcounts_Bf[i,]))/(max(zcounts_Bf[i,])-min(zcounts_Bf[i,]))))-1
+#}
+
+#for (i in seq(1:nrow(zcounts_Pf))) {
+#  zcounts_Pf[i,] <- (2*((zcounts_Pf[i,]-min(zcounts_Pf[i,]))/(max(zcounts_Pf[i,])-min(zcounts_Pf[i,]))))-1
+#}
+
+#for (i in seq(1:nrow(zcounts_Sp))) {
+#  zcounts_Sp[i,] <- (2*((zcounts_Sp[i,]-min(zcounts_Sp[i,]))/(max(zcounts_Sp[i,])-min(zcounts_Sp[i,]))))-1
+#}
+
+#for (i in seq(1:nrow(zcounts_Pd))) {
+#  zcounts_Pd[i,] <- (2*((zcounts_Pd[i,]-min(zcounts_Pd[i,]))/(max(zcounts_Pd[i,])-min(zcounts_Pd[i,]))))-1
+#}
+
+
+
+#some genes have the same values in all samples, and give NaN when z-scored
+#replace Nan with 0
+zcounts_Ao[is.na(zcounts_Ao)] <- 0
+zcounts_Bf[is.na(zcounts_Bf)] <- 0
+zcounts_Pf[is.na(zcounts_Pf)] <- 0
+zcounts_Sp[is.na(zcounts_Sp)] <- 0
+zcounts_Pd[is.na(zcounts_Pd)] <- 0
+
+zmerged_counts <- Reduce(merge, lapply(list(zcounts_Ao, zcounts_Bf, zcounts_Pf, zcounts_Sp, zcounts_Pd), data.table, keep.rownames = TRUE, key = "rn"))
+zmerged_counts <- as.data.frame(zmerged_counts)
+
+#remove extra col
+rownames(zmerged_counts) <- zmerged_counts$rn
+zmerged_counts <- zmerged_counts[,2:ncol(zmerged_counts)]
+
+
+
+```
+
+```{r, fig.width= 10, fig.height=4, echo=FALSE}
+
+
+
+#### AVERAGE OR NOT? (comment/uncomment)
+zmerged_counts_averaged <- data.frame(matrix(nrow=nrow(zmerged_counts),ncol=0))
+group_indeces <- c(0, cumsum(unname( table(merged_metadata$segment))))
+for (i in seq(1:(length(group_indeces)-1))) {
+  #print(i)
+  #print(paste0(i, "->" ,(group_indeces[i]+1),"_" ,group_indeces[i+1]))
+  tmp <- zmerged_counts[,(group_indeces[i]+1):group_indeces[i+1]]
+  
+  tmp_averages <- rowMeans(tmp)
+  zmerged_counts_averaged <- cbind(zmerged_counts_averaged, tmp_averages)
+  
+}
+colnames(zmerged_counts_averaged) <- paste0(unique(merged_metadata$segment), "_mean")
+zmerged_counts<- zmerged_counts_averaged
+
+merged_metadata_averaged <- merged_metadata
+merged_metadata_averaged <- merged_metadata_averaged[!duplicated(merged_metadata_averaged$segment),]
+rownames(merged_metadata_averaged) <- paste0(merged_metadata_averaged$segment, "_mean")
+merged_metadata <- merged_metadata_averaged
+###
+
+
+## For PCA we need to start with the data in the correct format (we need conditions as row, and genes as columns)
+
+load("Z://01_Stefano/Collaboration_Data/356_plottable_TF_orthogroups.rds") #356TF orthogroups #orthogroup_TFs
+#subset with only TF orthogroups
+zmerged_counts_TFs <- zmerged_counts[rownames(zmerged_counts) %in% orthogroup_TFs,] #273 orthogroups left
+# transpose our counts matrix (switch rows and columns)
+counts_VST_top2000_transposed <- t(zmerged_counts_TFs)
+
+
+#we will change gene symbols with their description, but many genes have empty values. Where empty, we will now replace with the gene symbol
+#annotation_info$Protein_name = coalesce(annotation_info$Protein_name, #when not NA
+#                                     annotation_info$gene_id) #when NA
+
+#save the original col_names (entrez_ID)
+#old_colnames <- colnames(counts_VST_top2000_transposed)
+
+
+#colnames(counts_VST_top2000_transposed) <- annotation_info$Protein_name[match(colnames(counts_VST_top2000_transposed), annotation_info$gene_id)]
+
+#save the new col_names (gull gene description, made unique with postscripts)
+#new_colnames <- colnames(counts_VST_top2000_transposed)
+#allowing us to create a name conversion dictionary for later steps using this PCA object
+#Genename_converter <- data.frame(gene_id = old_colnames, unique_description = new_colnames)
+
+
+
+```
+
+###Joint R2E seriation 
+```{r, fig.width=10, fig.height=15}
+Heatmap(t(scale(t(zmerged_counts_TFs))), cluster_columns = T, cluster_rows = T, na_col = "white", col = rev(brewer.pal(11,"RdBu")))
+```
+```{r}
+counts_VST_selectedgenes_all <- zmerged_counts_TFs
+#counts_VST_selectedgenes <- zmerged_counts_TFs[,c(2,3,5,6,7)]
+counts_VST_selectedgenes <- zmerged_counts_TFs
+```
+
+
+```{r}
+#define column proximity matrix C (samples)
+sample_correlation_matrix <- as.matrix(cor(counts_VST_selectedgenes,method="pearson"))
+ht <- Heatmap(sample_correlation_matrix)
+ht <- draw(ht)
+ht
+```

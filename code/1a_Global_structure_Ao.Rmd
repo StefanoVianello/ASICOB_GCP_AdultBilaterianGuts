@@ -1,0 +1,1069 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+##Ao
+
+```{r}
+load("Z://01_Stefano/Collaboration_Data/VST_Ao_corrected.rds")
+counts_VST <- VST_Ao_corrected
+
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Ao_samplemetadata_standard.rds") #sample_metadata
+liver_metadata <- data.frame(segment = rep("liver", 3), replicate = c(1,2,3))
+rownames(liver_metadata) <- c("liv_01", "liv_02", "liv_03")
+sample_metadata <- rbind(liver_metadata, sample_metadata)
+rm(liver_metadata)
+
+dictionary_aoce <-  get(load(file = "Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Aoce_dictionary_standard.rds"))
+
+
+#we will also define the colours for the heatmap labels, and the AP order of the segments
+color_categorical_segment <- rep(c("indianred1","lightpink", "sandybrown", "lightgoldenrod1",
+                    "dodgerblue3","lightskyblue","lightskyblue1"),each=1)
+names(color_categorical_segment) <- c("liver","oesophagus", "stomach", "pyloric", "A_intestine", "M_intestine", "P_intestine")
+
+ordered_levels_segment <- c("liver","oesophagus", "stomach", "pyloric", "A_intestine", "M_intestine", "P_intestine")
+```
+
+### gene selection (all) and replicate averaging
+
+```{r, echo=FALSE}
+selected_genes <- rownames(counts_VST) #21544
+```
+
+
+
+```{r}
+#we have our list of genes, and we know we can plot all of them.
+#so we can start now:
+
+## subset the original VST objects to only keep selected genes
+counts_VST_selectedgenes <- subset(counts_VST, rownames(counts_VST) %in% selected_genes)
+
+#sort in the order that the genes were given
+counts_VST_selectedgenes <- counts_VST_selectedgenes[match(selected_genes, rownames(counts_VST_selectedgenes)), ]
+
+
+#change the rownames with a more complete description (here, only the gene names)
+rownames(counts_VST_selectedgenes) <- dictionary_aoce$symbol[match(rownames(counts_VST_selectedgenes), dictionary_aoce$geneID)]
+
+counts_VST_selectedgenes <- as.data.frame(counts_VST_selectedgenes)
+```
+
+```{r, fig.width=4, fig.height=4, echo=FALSE}
+## For the PCA and clustering analysis, we will only use the part of the dataset that has the 1000 genes with the highest variance
+# Estimate the variance for each row in our counts_VST starting object
+var_genes <- apply(counts_VST_selectedgenes, 1, var)
+# Get the gene names for the top 1000 most variable genes
+top_genes <- names(sort(var_genes, decreasing=TRUE))[1:2000]
+
+# If using the threshold define above:
+#top_genes <- names(sort(var_genes, decreasing=TRUE))[1:variance_data_df[match(as.character(knee[[1]]),variance_data_df$breaks),"genes_above"]]
+
+# Subset vst matrix
+counts_VST_top2000 <- counts_VST_selectedgenes[top_genes,]
+
+#remove unused variables
+rm(var_genes)
+```
+
+#averaging
+
+```{r}
+counts_VST_selectedgenes <- counts_VST_top2000
+
+#create an empty dataframe with the right number of rows, which will host the average gene values
+counts_VST_averaged <- data.frame(matrix(nrow=nrow(counts_VST_selectedgenes),ncol=0))
+
+#to start, create a summary vst that contains the average value of each gene across replicates of the same condition
+group_indeces <- c(0, cumsum(unname( table(sample_metadata$segment))))
+#calculate the average by group of replicates
+for (i in seq(1:(length(group_indeces)-1))) {
+  #print(i)
+  #print(paste0(i, "->" ,(group_indeces[i]+1),"_" ,group_indeces[i+1]))
+  tmp <- counts_VST_selectedgenes[,(group_indeces[i]+1):group_indeces[i+1]]
+  
+  tmp_averages <- rowMeans(tmp)
+  counts_VST_averaged <- cbind(counts_VST_averaged, tmp_averages)
+  
+}
+
+#set nicer column names
+colnames(counts_VST_averaged) <- paste0(unique(sample_metadata$segment), "_mean")
+
+counts_VST_selectedgenes <- counts_VST_averaged
+```
+
+
+```{r}
+#now we need to remove genes that have no variance
+zcounts_VST_selectedgenes <- as.data.frame(t(scale(t(counts_VST_selectedgenes))))
+
+counts_VST_selectedgenes <- counts_VST_selectedgenes[match(rownames(na.omit(zcounts_VST_selectedgenes)), rownames(counts_VST_selectedgenes)), ] #still 2000
+
+```
+
+
+
+
+```{r}
+Heatmap(t(scale(t(counts_VST_selectedgenes))), cluster_columns = FALSE, cluster_rows = T, na_col = "white", col = rev(brewer.pal(11,"RdBu")))
+```
+
+### Correlation plot (average)
+
+```{r, fig.width=10, fig.height=10}
+pairs(counts_VST_selectedgenes, pch = 19, col= scales::alpha("black", 0.1), lower.panel = NULL)
+```
+
+
+```{r}
+# calculate correlation betwwen samples
+# RNA-Seq samples generally have very high correlation (R^2 > 0.9). R^2 values below 0.8 may be an indication of an outlier sample. Depending on other QC metric, these low correlation samples may be discarded from analyses.
+correlation_matrix <- as.matrix(cor(counts_VST_selectedgenes,method="spearman"))
+
+
+# Users should always use circlize::colorRamp2() function to generate the color mapping function
+#col_fun = colorRamp2(c(-1, 0, 1), brewer.pal(9,"BuPu")[c(1,5,9)])
+color_categorical_segment_named <- color_categorical_segment
+
+colAnn <- HeatmapAnnotation(df = data.frame(segment = paste0(unique(sample_metadata$segment), "_mean")), #the name of the column needs to mutch the name of the named list
+                            which = 'col',
+                            col = list("segment" = color_categorical_segment_named), #set the name of the named list so it matches
+                            #annotation_width = unit(c(1, 4), 'cm'),
+                            #gap = unit(1, 'mm')
+                            show_legend = FALSE,
+                            show_annotation_name = FALSE
+                            )
+
+rowAnn <- rowAnnotation(df = data.frame(segment = paste0(unique(sample_metadata$segment), "_mean")), #the name of the column needs to mutch the name of the named list
+                            col = list("segment" = color_categorical_segment_named), #set the name of the named list so it matches
+                        show_legend = FALSE,
+                        show_annotation_name = FALSE
+                            )
+
+
+
+image <- Heatmap(mat = correlation_matrix,
+        name= "Spearman's rho",
+        column_title = gt_render(paste0("<span style='color:darkorchid4'>**Spearman's ", expression(ρ), "**</span> correlation coeff. <br/> between samples <span style='color:gray60'>(on most variable genes)</span>")),
+        col = brewer.pal(9,"BuPu"),
+        #col = colorRamp2(c(-1, 0, 1), brewer.pal(9,"BuPu")[c(1,5,9)]),
+        #col = colorRamp2(c(-1, 0, 1), brewer.pal(9,"PiYG")[c(1,5,9)]),
+        #col = brewer.pal(9,"PiYG"),
+        #col =  colorRamp2(c(-0.5, 0, 1), brewer.pal(9,"PiYG")[c(1,5,9)]),
+        #col = 
+        na_col = "black",
+        cluster_rows = FALSE,
+        show_row_dend = FALSE,
+        #row_order = ordered_levels,
+        cluster_columns = FALSE,
+        show_column_dend = FALSE,
+        #column_order = ordered_levels,
+        row_split = factor(paste0(unique(sample_metadata$segment), "_mean")[1:7], levels = paste0(unique(sample_metadata$segment), "_mean")),
+        column_split = factor(paste0(unique(sample_metadata$segment), "_mean")[1:7], levels = paste0(unique(sample_metadata$segment), "_mean")),
+        cluster_row_slices = FALSE,
+        cluster_column_slices = FALSE,
+        row_title = NULL,
+        row_gap = unit(0.5, "mm"),
+        column_gap = unit(0.5, "mm"),
+        width = unit(8, "cm"), 
+        height = unit(8, "cm"),
+        column_names_gp = grid::gpar(fontsize = 8),
+        row_names_gp = grid::gpar(fontsize = 8),
+        #top_annotation = colAnn,
+        #left_annotation = rowAnn,
+        show_heatmap_legend = TRUE
+        )
+
+draw(image)
+
+
+
+
+
+```
+
+```{r}
+pdf(file="Z://01_Stefano/Collaboration_Data/Figure_elements/Ao_correlation.pdf")
+draw(image)
+dev.off()
+```
+```{r}
+# calculate correlation betwwen samples
+# RNA-Seq samples generally have very high correlation (R^2 > 0.9). R^2 values below 0.8 may be an indication of an outlier sample. Depending on other QC metric, these low correlation samples may be discarded from analyses.
+correlation_matrix <- as.matrix(cor(counts_VST_selectedgenes,method="spearman"))
+
+
+# Users should always use circlize::colorRamp2() function to generate the color mapping function
+#col_fun = colorRamp2(c(-1, 0, 1), brewer.pal(9,"BuPu")[c(1,5,9)])
+color_categorical_segment_named <- color_categorical_segment
+
+colAnn <- HeatmapAnnotation(df = data.frame(segment = paste0(unique(sample_metadata$segment), "_mean")), #the name of the column needs to mutch the name of the named list
+                            which = 'col',
+                            col = list("segment" = color_categorical_segment_named), #set the name of the named list so it matches
+                            #annotation_width = unit(c(1, 4), 'cm'),
+                            #gap = unit(1, 'mm')
+                            show_legend = FALSE,
+                            show_annotation_name = FALSE
+                            )
+
+rowAnn <- rowAnnotation(df = data.frame(segment = paste0(unique(sample_metadata$segment), "_mean")), #the name of the column needs to mutch the name of the named list
+                            col = list("segment" = color_categorical_segment_named), #set the name of the named list so it matches
+                        show_legend = FALSE,
+                        show_annotation_name = FALSE
+                            )
+
+
+
+image <- Heatmap(mat = correlation_matrix,
+        name= "Spearman's rho",
+        column_title = gt_render(paste0("<span style='color:darkorchid4'>**Spearman's ", expression(ρ), "**</span> correlation coeff. <br/> between samples <span style='color:gray60'>(on most variable genes)</span>")),
+        col = brewer.pal(9,"BuPu"),
+        #col = colorRamp2(c(-1, 0, 1), brewer.pal(9,"BuPu")[c(1,5,9)]),
+        #col = colorRamp2(c(-1, 0, 1), brewer.pal(9,"PiYG")[c(1,5,9)]),
+        #col = brewer.pal(9,"PiYG"),
+        #col =  colorRamp2(c(-0.5, 0, 1), brewer.pal(9,"PiYG")[c(1,5,9)]),
+        #col = 
+        na_col = "black",
+        cluster_rows = FALSE,
+        show_row_dend = FALSE,
+        #row_order = ordered_levels,
+        cluster_columns = FALSE,
+        show_column_dend = FALSE,
+        #column_order = ordered_levels,
+        row_split = factor(paste0(unique(sample_metadata$segment), "_mean")[1:7], levels = paste0(c("oesophagus", "stomach", "liver", "pyloric", "A_intestine", "M_intestine","P_intestine"), "_mean")),
+        column_split = factor(paste0(unique(sample_metadata$segment), "_mean")[1:7], levels = paste0(c("oesophagus", "stomach", "liver", "pyloric", "A_intestine", "M_intestine","P_intestine"), "_mean")),
+        cluster_row_slices = FALSE,
+        cluster_column_slices = FALSE,
+        row_title = NULL,
+        row_gap = unit(0.5, "mm"),
+        column_gap = unit(0.5, "mm"),
+        width = unit(8, "cm"), 
+        height = unit(8, "cm"),
+        column_names_gp = grid::gpar(fontsize = 8),
+        row_names_gp = grid::gpar(fontsize = 8),
+        #top_annotation = colAnn,
+        #left_annotation = rowAnn,
+        show_heatmap_legend = TRUE
+        )
+
+draw(image)
+
+
+
+
+
+```
+```{r}
+pdf(file="Z://01_Stefano/Collaboration_Data/Figure_elements/Ao_correlation_livermiddle.pdf")
+draw(image)
+dev.off()
+```
+
+```{r}
+# calculate correlation betwwen samples
+# RNA-Seq samples generally have very high correlation (R^2 > 0.9). R^2 values below 0.8 may be an indication of an outlier sample. Depending on other QC metric, these low correlation samples may be discarded from analyses.
+correlation_matrix <- as.matrix(cor(counts_VST_selectedgenes,method="kendall"))
+
+
+# Users should always use circlize::colorRamp2() function to generate the color mapping function
+#col_fun = colorRamp2(c(-1, 0, 1), brewer.pal(9,"BuPu")[c(1,5,9)])
+color_categorical_segment_named <- color_categorical_segment
+
+colAnn <- HeatmapAnnotation(df = data.frame(segment = paste0(unique(sample_metadata$segment), "_mean")), #the name of the column needs to mutch the name of the named list
+                            which = 'col',
+                            col = list("segment" = color_categorical_segment_named), #set the name of the named list so it matches
+                            #annotation_width = unit(c(1, 4), 'cm'),
+                            #gap = unit(1, 'mm')
+                            show_legend = FALSE,
+                            show_annotation_name = FALSE
+                            )
+
+rowAnn <- rowAnnotation(df = data.frame(segment = paste0(unique(sample_metadata$segment), "_mean")), #the name of the column needs to mutch the name of the named list
+                            col = list("segment" = color_categorical_segment_named), #set the name of the named list so it matches
+                        show_legend = FALSE,
+                        show_annotation_name = FALSE
+                            )
+
+
+Heatmap(mat = correlation_matrix,
+        name= "Spearman's rho",
+        column_title = gt_render(paste0("<span style='color:darkorchid4'>**Pearson's ", expression(ρ), "**</span> correlation coeff. <br/> between samples <span style='color:gray60'>(on most variable genes)</span>")),
+        col = brewer.pal(9,"BuPu"),
+        #col = colorRamp2(c(-1, 0, 1), brewer.pal(9,"BuPu")[c(1,5,9)]),
+        #col = colorRamp2(c(-1, 0, 1), brewer.pal(9,"PiYG")[c(1,5,9)]),
+        #col = brewer.pal(9,"PiYG"),
+        #col =  colorRamp2(c(-0.5, 0, 1), brewer.pal(9,"PiYG")[c(1,5,9)]),
+        #col = 
+        na_col = "black",
+        cluster_rows = FALSE,
+        show_row_dend = FALSE,
+        #row_order = ordered_levels,
+        cluster_columns = FALSE,
+        show_column_dend = FALSE,
+        #column_order = ordered_levels,
+        row_split = factor(paste0(unique(sample_metadata$segment), "_mean")[1:7], levels = paste0(unique(sample_metadata$segment), "_mean")),
+        column_split = factor(paste0(unique(sample_metadata$segment), "_mean")[1:7], levels = paste0(unique(sample_metadata$segment), "_mean")),
+        cluster_row_slices = FALSE,
+        cluster_column_slices = FALSE,
+        row_title = NULL,
+        row_gap = unit(0.5, "mm"),
+        column_gap = unit(0.5, "mm"),
+        width = unit(8, "cm"), 
+        height = unit(8, "cm"),
+        column_names_gp = grid::gpar(fontsize = 8),
+        row_names_gp = grid::gpar(fontsize = 8),
+        #top_annotation = colAnn,
+        #left_annotation = rowAnn,
+        show_heatmap_legend = TRUE
+        )
+
+```
+
+
+###R2E seriation
+
+```{r}
+counts_VST_selectedgenes_all <- counts_VST_selectedgenes
+counts_VST_selectedgenes <- counts_VST_selectedgenes[,seq(from=2, to =7)]
+
+zcounts_VST_selectedgenes <- as.data.frame(t(scale(t(counts_VST_selectedgenes))))
+
+counts_VST_selectedgenes <- counts_VST_selectedgenes[match(rownames(na.omit(zcounts_VST_selectedgenes)), rownames(counts_VST_selectedgenes)), ] #still 2000
+```
+
+```{r}
+Heatmap(t(scale(t(counts_VST_selectedgenes))), cluster_columns = FALSE, cluster_rows = T, na_col = "white", col = rev(brewer.pal(11,"RdBu")))
+```
+
+
+
+```{r}
+#define column proximity matrix C (samples)
+sample_correlation_matrix <- as.matrix(cor(counts_VST_selectedgenes,method="pearson"))
+Heatmap(sample_correlation_matrix)
+```
+
+
+```{r}
+#define row proximity matrix R (genes)
+gene_correlation_matrix <- as.matrix(cor(t(counts_VST_selectedgenes),method="spearman"))
+Heatmap(gene_correlation_matrix, show_column_names = FALSE, show_row_names = FALSE)
+```
+
+
+
+
+
+```{r}
+#test R2E seriation, beginning with R the column/sample similarity matrix
+#manually (original paper )
+
+gene_correlation_matrix <- as.matrix(cor(t(counts_VST_selectedgenes),method="pearson"))
+#Heatmap(gene_correlation_matrix, 
+#        cluster_rows = T,
+#        cluster_columns = T)
+#plot(svd(gene_correlation_matrix)$u[, 1], svd(gene_correlation_matrix)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R1 <- as.matrix(cor(gene_correlation_matrix,method="pearson"))
+#Heatmap(R1,
+#        cluster_rows = T,
+#        cluster_columns = T)
+plot(svd(R1)$u[, 1], svd(R1)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R2 <- as.matrix(cor(R1,method="pearson"))
+#Heatmap(R2,
+#        cluster_rows = T,
+#        cluster_columns = T)
+#plot(svd(R2)$u[, 1], svd(R2)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R3 <- as.matrix(cor(R2,method="pearson"))
+#Heatmap(R3,
+#        cluster_rows = T,
+#        cluster_columns = T)
+#plot(svd(R3)$u[, 1], svd(R3)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R4 <- as.matrix(cor(R3,method="pearson"))
+#Heatmap(R4,
+#        cluster_rows = T,
+#        cluster_columns = T)
+plot(svd(R4)$u[, 1], svd(R4)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+
+R5 <- as.matrix(cor(R4,method="pearson"))
+#Heatmap(R5,
+#        cluster_rows = T,
+#        cluster_columns = T)
+plot(svd(R5)$u[, 1], svd(R5)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+R6 <- as.matrix(cor(R5,method="pearson"))
+#Heatmap(R6,
+#        cluster_rows = T,
+#        cluster_columns = T)
+plot(svd(R6)$u[, 1], svd(R6)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+
+
+#in the original publication, rank is indicated as the number of eigenvalues > e-13
+length(svd(gene_correlation_matrix)$d[svd(gene_correlation_matrix)$d >= exp(-13)])
+length(svd(R1)$d[svd(R1)$d >= exp(-13)])
+length(svd(R2)$d[svd(R2)$d >= exp(-13)])
+length(svd(R3)$d[svd(R3)$d >= exp(-13)])
+length(svd(R4)$d[svd(R4)$d >= exp(-13)])
+length(svd(R5)$d[svd(R5)$d >= exp(-13)])
+length(svd(R6)$d[svd(R6)$d >= exp(-13)])
+
+#finally, plot the sum of squares of eigenvalues
+df_sos <- data.frame(sum_of_squares = c(sum((svd(gene_correlation_matrix)$d)^2),
+                sum((svd(R1)$d)^2),
+                sum((svd(R2)$d)^2),
+                sum((svd(R3)$d)^2),
+                sum((svd(R4)$d)^2),
+                sum((svd(R5)$d)^2),
+                sum((svd(R6)$d)^2)
+                )
+)
+df_sos$R <- c(0,seq(from=1, to=(nrow(df_sos)-1)))
+df_sos
+
+plot(df_sos$R, df_sos$sum_of_squares)
+```
+
+
+```{r}
+#identify the first rank 2 matrix (R4 in this case)
+R_r2 <- R3
+#R_r2 <- as.matrix(cor(R_r2,method="pearson"))
+#Heatmap(R_r2,
+#        cluster_rows = T,
+#        cluster_columns = T)
+#plot(svd(R_r2)$u[, 1], svd(R_r2)$u[, 2], xlab = "U1", ylab = "U2", pch=19)
+
+#the two axis of the 2D ellipse, given a matrix with rank2, with two eigenvalues, is sqrt(1/eigenvalue1) and srqt(1/eigenvalue2)
+#svd(R_r2)$d[svd(R_r2)$d >= exp(-13)]
+#1/svd(R_r2)$d[svd(R_r2)$d >= exp(-13)]
+sqrt(1/svd(R_r2)$d[svd(R_r2)$d >= exp(-13)])
+
+
+PC1PC2_df <- data.frame(U1= svd(R_r2)$u[, 1], U2=svd(R_r2)$u[, 2])
+
+#ggplot(PC1PC2_df, aes(x=U1, y=U2))+
+#  ggforce::geom_ellipse(aes(x0 = 0, y0 = 0, 
+#                            a = sqrt(1/svd(R_r2)$d[svd(R_r2)$d >= exp(-13)])[1], 
+#                            b = sqrt(1/svd(R_r2)$d[svd(R_r2)$d >= exp(-13)])[2], 
+#                            angle = 0),
+#                        color = "gray")+
+#   geom_point()+
+#  theme_bw()+
+#  theme(legend.position = "null")
+
+
+#find the biggest cut
+angle <- function(x,y){
+  atan2(y[2],y[1]) - atan2(x[2],x[1])
+}
+
+for (i in seq(from=1, to=(nrow(PC1PC2_df)))) {
+  x <- c(PC1PC2_df$U1[i],PC1PC2_df$U2[i])
+  y <- c(1,0)
+  PC1PC2_df$angle[i] <- angle(x, y)
+}
+
+tmp <- PC1PC2_df[order(PC1PC2_df$angle, decreasing = T),]  
+tmp #this will be ordered counterclocwise
+
+#tmp <- PC1PC2_df[order(PC1PC2_df$angle, decreasing = F),]  
+#tmp #this will be ordered clocwise
+
+
+cuts <-  as.vector(tmp$angle[1:(length(tmp$angle)-1)])-as.vector(tmp$angle[2:length(tmp$angle)])
+cuts <- c(cuts, tmp$angle[length(tmp$angle)]+tmp$angle[1])
+cuts
+
+plot_ly(data = tmp, 
+        x = ~U1, y = ~U2, 
+        #color = ~segment, 
+        #symbol = ~species,
+        #colors = c("chocolate1", "green3", "pink","orchid", "skyblue"),
+        #colors = color_categorical_all,
+        #colors = c("indianred1", "dodgerblue", "dodgerblue"),
+        #colors = colorRampPalette(brewer.pal(name = "RdBu", n = 9))(13),
+        type = "scatter", 
+        mode = "markers", 
+        marker = list(size = 2, width=2), # controls size of points
+        text=~seq(1:nrow(tmp)), #This is that extra column we made earlier for which we will use for cell ID
+        hoverinfo="text") #When you visualize your plotly object, hovering your mouse pointer over a point shows cell names
+
+#cut_index <- which(abs(cuts) == sort(abs(cuts), decreasing = T)[2])
+#cut_index <- which(abs(cuts) == sort(abs(cuts), decreasing = T)[2])
+```
+
+
+```{r}
+
+cut_index <- 1385
+
+
+ifelse(cut_index == nrow(tmp), 
+       tmp2_genes <- tmp,
+       tmp2_genes <- rbind(tmp[(cut_index+1):nrow(tmp),], tmp[1:cut_index,])
+       )
+
+tmp2_genes
+#as.numeric(rownames(tmp2_genes))
+```
+
+```{r}
+#Heatmap(gene_correlation_matrix,
+#        cluster_rows = F,
+#        cluster_columns = F,
+#        row_order = rownames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))],
+#        column_order = colnames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))])
+```
+
+```{r}
+#if you still want to plot the original full set of segments (counts_VST_selectedgenes_all), even though the order was calculated on a subset of the samples, and some of the genes may have been removed in the process
+counts_VST_selectedgenes_all2 <- counts_VST_selectedgenes_all[rownames(counts_VST_selectedgenes_all) %in% rownames(counts_VST_selectedgenes),]
+```
+
+
+```{r, fig.height=15, fig.width=20}
+
+#we can now plot the three matrices
+ht1 <- Heatmap(gene_correlation_matrix,
+               width=3,
+        cluster_rows = F,
+        cluster_columns = F,
+        row_order = rownames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))],
+        #row_order = rownames(counts_VST_selectedgenes)[as.numeric(c(c("11", "13"), rownames(tmp2_genes)[1:23]))],
+        column_order = colnames(gene_correlation_matrix)[as.numeric(rownames(tmp2_genes))],
+        col = rev(brewer.pal(9,"PiYG")),
+        use_raster = TRUE)
+
+
+ht2 <- Heatmap(t(scale(t(counts_VST_selectedgenes))),
+               width=3,
+        cluster_rows = F,
+        cluster_columns = F,
+        row_order = rownames(counts_VST_selectedgenes)[as.numeric(rownames(tmp2_genes))],
+        #row_order = rownames(counts_VST_selectedgenes)[as.numeric(c(c("11", "13"), rownames(tmp2_genes)[1:23]))],
+        #column_order = c("oesophagus_mean", "stomach_mean", "liver_mean", "pyloric_mean" ,    "A_intestine_mean", "M_intestine_mean","P_intestine_mean"),
+        #column_order = colnames(counts_VST_top2000)[c(1,2,3,5,4,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21)],
+        col = rev(brewer.pal(11,"RdBu")),
+        use_raster = TRUE
+        
+        )
+
+#ht3 <- Heatmap(sample_correlation_matrix,
+#        cluster_rows = F,
+#        cluster_columns = F,
+#        row_order = rownames(sample_correlation_matrix)[as.numeric(rownames(tmp2))],
+#        column_order = colnames(sample_correlation_matrix)[as.numeric(rownames(tmp2))],
+#        col = rev(brewer.pal(9,"PiYG")))
+
+
+
+ht_list = ht1 + ht2
+draw(ht_list)
+```
+
+```{r}
+pdf(file="Z://01_Stefano/Collaboration_Data/Figure_elements/Ao_globalstructure_R2E.pdf")
+draw(ht2)
+dev.off()
+```
+
+
+### PCA (show replicates)
+
+```{r}
+#remove liver to highlight arch shape
+load("Z://01_Stefano/Collaboration_Data/VST_Ao_corrected.rds")
+counts_VST <- VST_Ao_corrected
+
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Ao_samplemetadata_standard.rds") #sample_metadata
+liver_metadata <- data.frame(segment = rep("liver", 3), replicate = c(1,2,3))
+rownames(liver_metadata) <- c("liv_01", "liv_02", "liv_03")
+sample_metadata <- rbind(liver_metadata, sample_metadata)
+rm(liver_metadata)
+
+dictionary_aoce <-  get(load(file = "Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Aoce_dictionary_standard.rds"))
+
+
+#we will also define the colours for the heatmap labels, and the AP order of the segments
+color_categorical_segment <- rep(c("indianred1","lightpink", "sandybrown", "lightgoldenrod1",
+                    "dodgerblue3","lightskyblue","lightskyblue1"),each=1)
+names(color_categorical_segment) <- c("liver","oesophagus", "stomach", "pyloric", "A_intestine", "M_intestine", "P_intestine")
+
+ordered_levels_segment <- c("liver","oesophagus", "stomach", "pyloric", "A_intestine", "M_intestine", "P_intestine")
+```
+
+```{r, echo=FALSE}
+selected_genes <- rownames(counts_VST) #21544
+```
+
+
+
+```{r}
+#we have our list of genes, and we know we can plot all of them.
+#so we can start now:
+
+## subset the original VST objects to only keep selected genes
+counts_VST_selectedgenes <- subset(counts_VST, rownames(counts_VST) %in% selected_genes)
+
+#sort in the order that the genes were given
+counts_VST_selectedgenes <- counts_VST_selectedgenes[match(selected_genes, rownames(counts_VST_selectedgenes)), ]
+
+
+#change the rownames with a more complete description (here, only the gene names)
+rownames(counts_VST_selectedgenes) <- dictionary_aoce$symbol[match(rownames(counts_VST_selectedgenes), dictionary_aoce$geneID)]
+
+counts_VST_selectedgenes <- as.data.frame(counts_VST_selectedgenes)
+```
+
+```{r}
+
+counts_VST_selectedgenes <- counts_VST_selectedgenes[4:21]
+sample_metadata <- sample_metadata[4:21,]
+rownames(sample_metadata) <- paste0("Ao_", rownames(sample_metadata))
+```
+
+
+```{r, fig.width=4, fig.height=4, echo=FALSE}
+## For the PCA and clustering analysis, we will only use the part of the dataset that has the 1000 genes with the highest variance
+# Estimate the variance for each row in our counts_VST starting object
+var_genes <- apply(counts_VST_selectedgenes, 1, var)
+# Get the gene names for the top 1000 most variable genes
+top_genes <- names(sort(var_genes, decreasing=TRUE))[1:2000]
+
+# If using the threshold define above:
+#top_genes <- names(sort(var_genes, decreasing=TRUE))[1:variance_data_df[match(as.character(knee[[1]]),variance_data_df$breaks),"genes_above"]]
+
+# Subset vst matrix
+counts_VST_top2000 <- counts_VST_selectedgenes[top_genes,]
+
+#remove unused variables
+rm(var_genes)
+```
+
+```{r, fig.width= 10, fig.height=4, echo=FALSE}
+## For PCA we need to start with the data in the correct format (we need conditions as row, and genes as columns)
+# transpose our counts matrix (switch rows and columns)
+counts_VST_top2000_transposed <- t(counts_VST_top2000)
+
+
+#we will change gene symbols with their description, but many genes have empty values. Where empty, we will now replace with the gene symbol
+#annotation_info$Protein_name = coalesce(annotation_info$Protein_name, #when not NA
+#                                     annotation_info$gene_id) #when NA
+
+#save the original col_names (entrez_ID)
+#old_colnames <- colnames(counts_VST_top2000_transposed)
+
+
+#colnames(counts_VST_top2000_transposed) <- annotation_info$Protein_name[match(colnames(counts_VST_top2000_transposed), annotation_info$gene_id)]
+
+#save the new col_names (gull gene description, made unique with postscripts)
+#new_colnames <- colnames(counts_VST_top2000_transposed)
+#allowing us to create a name conversion dictionary for later steps using this PCA object
+#Genename_converter <- data.frame(gene_id = old_colnames, unique_description = new_colnames)
+
+
+#we can now calculate PCA (on the top 2000 genes)
+PCAobject_top2000 <- prcomp(x=counts_VST_top2000_transposed, center = T, scale. = F)
+
+# Plot Scree Plot of our data "WHY WE USE STANDART DEV^2? WHAT IS 100, WHAT IS 2?
+{barplot(round(PCAobject_top2000$sdev^2/sum(PCAobject_top2000$sdev^2)*100,2),
+         las=2,
+         names.arg=colnames(PCAobject_top2000$x),
+         ylab="% Variance explained",
+         xlab="PCA principal components",
+         ylim =range(pretty(c(0, 80))),
+         main = "Scree plot (top2000 variant genes)"
+         )
+abline(h=100/length(colnames(PCAobject_top2000$x)), lty=2, col="dodgerblue")}
+
+
+#remove unused variables
+#rm(new_colnames, old_colnames)
+```
+
+```{r, fig.width= 12, fig.height=9, echo=FALSE}
+## PCA (segment colour code)
+#View(PCAobject_top2000$x)
+#View(PCAobject_top2000)
+#check the proportion of variance value
+#view (summary(PCAobject_top2000)$importance)
+#View(sample_metadata)
+# we will use ggplot, so we need to add a column with the sample names to our data
+PCAobject_top2000_ggplot <- merge(as.data.frame(PCAobject_top2000$x),
+                                  sample_metadata, #we are merging with a dataframe that has a column "segment" and "replicate" for each sample
+                                  by=0)
+
+
+PCAobject_top2000_ggplot$segment <- factor(PCAobject_top2000_ggplot$segment, levels = unique(sample_metadata$segment))
+
+gradient_palette <- colorRampPalette(brewer.pal(9, "Reds")[3:9])(length(unique(PCAobject_top2000_ggplot$segment)))
+
+
+plot1a <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC2,colour=segment, shape=replicate ))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_color_manual(values = color_categorical_segment)+
+  scale_color_manual(values = gradient_palette)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+plot1b <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC2,colour=replicate, shape=replicate ))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+
+
+plot2a <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC2,colour=segment, shape=replicate))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22 ))+ 
+  scale_color_manual(values = gradient_palette)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC3 (", round(summary(PCAobject_top2000)$importance[8]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+
+plot2b <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC2,colour=replicate, shape=replicate))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22 ))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC3 (", round(summary(PCAobject_top2000)$importance[8]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+
+
+plot3a <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC4,colour=segment, shape=replicate))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  scale_color_manual(values = gradient_palette)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  theme_classic()+ theme(legend.position="right")
+
+plot3b <- ggplot(PCAobject_top2000_ggplot,
+       aes(PC3,PC4,colour=replicate, shape=replicate))+
+  geom_point(size=3)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_fill_manual(values = color_categorical_segment)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  theme_classic()+ theme(legend.position="right")
+
+
+
+grid.arrange(plot1a, plot1b, 
+             plot2a, plot2b,
+             plot3a, plot3b,
+             ncol=2, nrow=3)
+
+#remove unused variables
+#rm(plot1, plot2, plot3)
+
+```
+
+```{r, fig.width=6, fig.height=4}
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC2,fill=segment ))+
+  geom_point(size=6, shape=21)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_color_manual(values = color_categorical_segment)+
+  scale_fill_manual(values = gradient_palette)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+```
+```{r}
+pdf(file="Z://01_Stefano/Collaboration_Data/Figure_elements/Ao_globalstructure_PCA.pdf")
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC2,fill=segment ))+
+  geom_point(size=6, shape=21)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_color_manual(values = color_categorical_segment)+
+  scale_fill_manual(values = gradient_palette)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+dev.off()
+```
+
+
+
+```{r, fig.height=0.4, fig.width=6}
+qplot(x=1:(length(gradient_palette)+1), y = 1, fill=factor(1:(length(gradient_palette)+1)), geom="tile") +
+  scale_fill_manual(values = c("gray90",gradient_palette)) +
+  theme_void()+
+  theme(legend.position="none") 
+```
+
+```{r}
+pdf(file="Z://01_Stefano/Collaboration_Data/Figure_elements/Ao_globalstructure_palette.pdf")
+qplot(x=1:(length(gradient_palette)+1), y = 1, fill=factor(1:(length(gradient_palette)+1)), geom="tile") +
+  scale_fill_manual(values = c("gray90",gradient_palette)) +
+  theme_void()+
+  theme(legend.position="none") 
+dev.off()
+```
+
+
+```{r, fig.height=0.4, fig.width=6}
+qplot(x=1:(length(gradient_palette)+1), y = 1, fill=factor(1:(length(gradient_palette)+1)), geom="tile") +
+  scale_fill_manual(values = c("gray90",gradient_palette)) +
+  theme_void()+
+  theme(legend.position="none") 
+```
+
+
+### Horseshoe exploration
+
+```{r}
+#remove liver to highlight arch shape
+load("Z://01_Stefano/Collaboration_Data/VST_Ao_corrected.rds")
+counts_VST <- VST_Ao_corrected
+
+load("Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Ao_samplemetadata_standard.rds") #sample_metadata
+liver_metadata <- data.frame(segment = rep("liver", 3), replicate = c(1,2,3))
+rownames(liver_metadata) <- c("liv_01", "liv_02", "liv_03")
+sample_metadata <- rbind(liver_metadata, sample_metadata)
+rm(liver_metadata)
+
+dictionary_aoce <-  get(load(file = "Z://01_Stefano/Collaboration_Data/Annotations/Dictionaries_standard/Aoce_dictionary_standard.rds"))
+
+
+#we will also define the colours for the heatmap labels, and the AP order of the segments
+color_categorical_segment <- rep(c("indianred1","lightpink", "sandybrown", "lightgoldenrod1",
+                    "dodgerblue3","lightskyblue","lightskyblue1"),each=1)
+names(color_categorical_segment) <- c("liver","oesophagus", "stomach", "pyloric", "A_intestine", "M_intestine", "P_intestine")
+
+ordered_levels_segment <- c("liver","oesophagus", "stomach", "pyloric", "A_intestine", "M_intestine", "P_intestine")
+```
+
+```{r, echo=FALSE}
+selected_genes <- rownames(counts_VST) #21544
+```
+
+
+
+```{r}
+#we have our list of genes, and we know we can plot all of them.
+#so we can start now:
+
+## subset the original VST objects to only keep selected genes
+counts_VST_selectedgenes <- subset(counts_VST, rownames(counts_VST) %in% selected_genes)
+
+#sort in the order that the genes were given
+counts_VST_selectedgenes <- counts_VST_selectedgenes[match(selected_genes, rownames(counts_VST_selectedgenes)), ]
+
+
+#change the rownames with a more complete description (here, only the gene names)
+rownames(counts_VST_selectedgenes) <- dictionary_aoce$symbol[match(rownames(counts_VST_selectedgenes), dictionary_aoce$geneID)]
+
+counts_VST_selectedgenes <- as.data.frame(counts_VST_selectedgenes)
+```
+
+```{r}
+counts_VST_selectedgenes <- counts_VST_selectedgenes[10:21]
+sample_metadata <- sample_metadata[10:21,]
+rownames(sample_metadata) <- paste0("Ao_", rownames(sample_metadata))
+gradient_palette <- colorRampPalette(brewer.pal(9, "Reds")[3:9])(6)[3:6]
+
+#counts_VST_selectedgenes <- counts_VST_selectedgenes[13:21]
+#sample_metadata <- sample_metadata[13:21,]
+#rownames(sample_metadata) <- paste0("Ao_", rownames(sample_metadata))
+#gradient_palette <- colorRampPalette(brewer.pal(9, "Reds")[3:9])(6)[4:6]
+```
+
+
+```{r, fig.width=4, fig.height=4, echo=FALSE}
+## For the PCA and clustering analysis, we will only use the part of the dataset that has the 1000 genes with the highest variance
+# Estimate the variance for each row in our counts_VST starting object
+var_genes <- apply(counts_VST_selectedgenes, 1, var)
+# Get the gene names for the top 1000 most variable genes
+top_genes <- names(sort(var_genes, decreasing=TRUE))[1:2000]
+
+# If using the threshold define above:
+#top_genes <- names(sort(var_genes, decreasing=TRUE))[1:variance_data_df[match(as.character(knee[[1]]),variance_data_df$breaks),"genes_above"]]
+
+# Subset vst matrix
+counts_VST_top2000 <- counts_VST_selectedgenes[top_genes,]
+
+#remove unused variables
+rm(var_genes)
+```
+
+```{r, fig.width= 10, fig.height=4, echo=FALSE}
+## For PCA we need to start with the data in the correct format (we need conditions as row, and genes as columns)
+# transpose our counts matrix (switch rows and columns)
+counts_VST_top2000_transposed <- t(counts_VST_top2000)
+
+
+#we will change gene symbols with their description, but many genes have empty values. Where empty, we will now replace with the gene symbol
+#annotation_info$Protein_name = coalesce(annotation_info$Protein_name, #when not NA
+#                                     annotation_info$gene_id) #when NA
+
+#save the original col_names (entrez_ID)
+#old_colnames <- colnames(counts_VST_top2000_transposed)
+
+
+#colnames(counts_VST_top2000_transposed) <- annotation_info$Protein_name[match(colnames(counts_VST_top2000_transposed), annotation_info$gene_id)]
+
+#save the new col_names (gull gene description, made unique with postscripts)
+#new_colnames <- colnames(counts_VST_top2000_transposed)
+#allowing us to create a name conversion dictionary for later steps using this PCA object
+#Genename_converter <- data.frame(gene_id = old_colnames, unique_description = new_colnames)
+
+
+#we can now calculate PCA (on the top 2000 genes)
+PCAobject_top2000 <- prcomp(x=counts_VST_top2000_transposed, center = T, scale. = F)
+
+# Plot Scree Plot of our data "WHY WE USE STANDART DEV^2? WHAT IS 100, WHAT IS 2?
+{barplot(round(PCAobject_top2000$sdev^2/sum(PCAobject_top2000$sdev^2)*100,2),
+         las=2,
+         names.arg=colnames(PCAobject_top2000$x),
+         ylab="% Variance explained",
+         xlab="PCA principal components",
+         ylim =range(pretty(c(0, 80))),
+         main = "Scree plot (top2000 variant genes)"
+         )
+abline(h=100/length(colnames(PCAobject_top2000$x)), lty=2, col="dodgerblue")}
+
+
+#remove unused variables
+#rm(new_colnames, old_colnames)
+```
+
+```{r, fig.width= 12, fig.height=9, echo=FALSE}
+## PCA (segment colour code)
+#View(PCAobject_top2000$x)
+#View(PCAobject_top2000)
+#check the proportion of variance value
+#view (summary(PCAobject_top2000)$importance)
+#View(sample_metadata)
+# we will use ggplot, so we need to add a column with the sample names to our data
+PCAobject_top2000_ggplot <- merge(as.data.frame(PCAobject_top2000$x),
+                                  sample_metadata, #we are merging with a dataframe that has a column "segment" and "replicate" for each sample
+                                  by=0)
+
+
+PCAobject_top2000_ggplot$segment <- factor(PCAobject_top2000_ggplot$segment, levels = unique(sample_metadata$segment))
+
+
+
+
+
+```
+
+```{r, fig.width=6, fig.height=4}
+ggplot(PCAobject_top2000_ggplot,
+       aes(PC1,PC2,fill=segment ))+
+  geom_point(size=6, shape=21)+
+  #scale_color_manual(values = rep("gray30", 3))+
+  #scale_shape_manual(values = c(24, 23, 22))+ 
+  #scale_color_manual(values = color_categorical_segment)+
+  scale_fill_manual(values = gradient_palette)+
+  #xlim(-55, 55)+
+  #ylim(-55, 55)+
+  xlab(paste("PC1 (", round(summary(PCAobject_top2000)$importance[2]*100,2), "%)")) + 
+  ylab(paste("PC2 (", round(summary(PCAobject_top2000)$importance[5]*100,2), "%)"))+
+  theme_classic()+ theme(legend.position="right")
+```
+
+```{r, fig.width=15, fig.height=12, echo=FALSE, message=FALSE}
+#diagnostic plots
+# see https://www.nature.com/articles/ng.139
+
+#In brief: the position of samples along PCA space (the value of each principal component), when the samples are ordered based on the latent ordering that is introducing the artifact, is approximated by oscillatory functions of increasing frequency 
+
+PCAobject_top2000_ggplot_numericAP <- PCAobject_top2000_ggplot
+PCAobject_top2000_ggplot_numericAP$numericAP <- as.numeric(PCAobject_top2000_ggplot_numericAP$segment)
+
+PCs <- paste0("PC", seq(1:5))
+
+# Make plots.
+plot_list = list()
+plot_list2 = list()
+
+for (i in 1:length(PCs)) {
+  p = ggplot(PCAobject_top2000_ggplot_numericAP,
+             aes_string(x="numericAP",y=PCs[i]))+
+    geom_point(size=3, aes(colour= numericAP,  shape=replicate))+
+    #scale_color_manual(values = color_categorical_segment)+ 
+    scale_color_distiller(palette="RdBu")+
+    #stat_summary(fun.y="mean", geom="smooth", aes(group=1), color= "gray")+
+    geom_smooth(aes(group=1), color= "gray", se=FALSE)+
+    xlab("AP-ordered samples") + 
+    ylab(paste(PCs[i],"(", round(summary(PCAobject_top2000)$importance[(2+(3*(i-1)))]*100,2), "%)"))+
+    ggtitle(paste0(PCs[i], " scores"))+
+    theme_classic()+ theme(legend.position="none")
+  
+  plot_list[[i]] = p
+  
+  if (i >=2) {
+    
+    p2 = ggplot(PCAobject_top2000_ggplot_numericAP,
+                aes_string(x=PCs[i-1],y=PCs[i]))+
+      geom_point(size=3, aes(colour= numericAP, shape=replicate))+
+      scale_color_distiller(palette="RdBu")+
+      #stat_summary(fun.y="mean", geom="smooth", aes(group=numericAP), color= "gray")+
+  xlab(paste(PCs[i-1],"(", round(summary(PCAobject_top2000)$importance[(2+(3*((i-1)-1)))]*100,2), "%)")) + 
+  ylab(paste(PCs[i],"(", round(summary(PCAobject_top2000)$importance[(2+(3*(i-1)))]*100,2), "%)"))+
+       ggtitle(paste0(PCs[i-1], " vs ", PCs[i]), "coloured by AP order")+
+  theme_classic()+ theme(legend.position="none")
+    
+    plot_list[[i+(length(PCs)-1)]] = p2  
+    
+  }
+  
+  #print(plot_list[[i]])
+}
+
+  
+
+
+
+
+do.call("grid.arrange", c(c(plot_list), ncol=length(PCs), nrow=4))
+
+
+```
+
+
+
+
+
