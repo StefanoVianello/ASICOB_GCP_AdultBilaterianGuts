@@ -1,7 +1,7 @@
 # Code repository: "Deconstructing the common anteroposterior organisation of adult bilaterian guts" (2025)
 
 Data and code associated with the publication: <br/><br/>
-<b>"The anteroposterior molecular blueprint of adult guts is shared across bilaterians" [PROVISIONAL TITLE] </b> <br/>
+<b>"Comparative transcriptomics reveal the common anteroposterior molecular blueprint of adult bilaterian guts" [PROVISIONAL TITLE] </b> <br/>
 Stefano Davide <b>Vianello</b>, Ching-Yi <b>Lin</b>, Wahyu Cristine <b>Pinem</b>, Han-Ru <b>Li</b>, Kun-Lung <b>Li</b>, Grace <b>Sonia</b>, Shu-Hua <b>Lee</b>, Szu-Kai <b>Wu</b>, Vincent <b>Laudet</b>, Yi-Hsien <b>Su</b>, Jr-Kai <b>Yu</b>, Stephan Q <b>Schneider</b> | PLOS Biology; *forthcoming*<br/>
 
 <b>"Deconstructing the common anteroposterior organisation of adult bilaterian guts" </b> <br/>
